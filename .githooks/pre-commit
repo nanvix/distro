@@ -1,0 +1,26 @@
+#!/bin/sh
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if command -v python3 >/dev/null 2>&1; then
+    python=python3
+elif command -v python >/dev/null 2>&1; then
+    python=python
+else
+    echo "pre-commit: Python 3 was not found in PATH" >&2
+    exit 1
+fi
+
+if ! "$python" -c "import black, pyright" >/dev/null 2>&1; then
+    echo "pre-commit: install lint dependencies with: $python -m pip install black pyright" >&2
+    exit 1
+fi
+
+echo "pre-commit: checking Python formatting"
+"$python" -m black --target-version py312 --check z.py nanvix_distro tests
+
+echo "pre-commit: checking Python types"
+"$python" -m pyright

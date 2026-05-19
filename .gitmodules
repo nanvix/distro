@@ -1,0 +1,42 @@
+[submodule "nanvix"]
+	path = nanvix
+	url = https://github.com/nanvix/nanvix
+[submodule "usr/bin/bzip2"]
+	path = usr/bin/bzip2
+	url = https://github.com/nanvix/bzip2
+[submodule "usr/lib/libxml2"]
+	path = usr/lib/libxml2
+	url = https://github.com/nanvix/libxml2
+[submodule "usr/lib/libxslt"]
+	path = usr/lib/libxslt
+	url = https://github.com/nanvix/libxslt
+[submodule "usr/lib/lxml"]
+	path = usr/lib/lxml
+	url = https://github.com/nanvix/lxml
+[submodule "usr/bin/zlib"]
+	path = usr/bin/zlib
+	url = https://github.com/nanvix/zlib
+[submodule "usr/bin/xz"]
+	path = usr/bin/xz
+	url = https://github.com/nanvix/xz
+[submodule "usr/bin/sqlite"]
+	path = usr/bin/sqlite
+	url = https://github.com/nanvix/sqlite
+[submodule "usr/bin/cpython"]
+	path = usr/bin/cpython
+	url = https://github.com/nanvix/cpython
+[submodule "usr/lib/zutils"]
+	path = usr/lib/zutils
+	url = https://github.com/nanvix/zutils
+[submodule "usr/bin/quickjs"]
+	path = usr/bin/quickjs
+	url = https://github.com/nanvix/quickjs
+[submodule "usr/bin/busybox"]
+	path = usr/bin/busybox
+	url = https://github.com/nanvix/busybox
+[submodule "usr/bin/openssl"]
+	path = usr/bin/openssl
+	url = https://github.com/nanvix/openssl
+[submodule "usr/lib/libffi"]
+	path = usr/lib/libffi
+	url = https://github.com/nanvix/libffi

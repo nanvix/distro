@@ -1,0 +1,26 @@
+name = "python"
+
+[[program]]
+source = "runtime"
+path = "bin/procd.elf"
+argv = ["procd"]
+
+[[program]]
+source = "runtime"
+path = "bin/memd.elf"
+argv = ["memd"]
+
+[[program]]
+source = "runtime"
+path = "bin/vfsd.elf"
+argv = ["vfsd"]
+
+[[program]]
+source = "package:cpython"
+path = "bin/python.elf"
+argv = ["python"]
+env = { PYTHONHOME = "/", PYTHONDONTWRITEBYTECODE = "1", _PYTHON_SYSCONFIGDATA_NAME = "_sysconfigdata__nanvix_" }
+
+[ramfs-image]
+source = "package:cpython"
+path = "cpython-ramfs.img"

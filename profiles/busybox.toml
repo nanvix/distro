@@ -1,0 +1,30 @@
+name = "busybox"
+ramfs-directories = ["/tmp"]
+
+[[program]]
+source = "runtime"
+path = "bin/procd.elf"
+argv = ["procd"]
+
+[[program]]
+source = "runtime"
+path = "bin/memd.elf"
+argv = ["memd"]
+
+[[program]]
+source = "runtime"
+path = "bin/vfsd.elf"
+argv = ["vfsd"]
+
+[init]
+source = "package:busybox"
+path = "bin/busybox.elf"
+interpreter = "ash"
+script = "rootfs/busybox/init"
+destination = "/init"
+env = { HOME = "/", PATH = "/bin:/usr/bin", TERM = "vt100" }
+
+[[ramfs]]
+source = "package:busybox"
+path = "bin/busybox.elf"
+destination = "/bin/busybox"

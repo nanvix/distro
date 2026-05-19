@@ -1,0 +1,8 @@
+#!/bin/ash
+
+export HOME=/
+export PATH=/bin:/usr/bin
+export PS1='nanvix# '
+
+echo "NANVIX_BUSYBOX_READY"
+exec /bin/busybox ash

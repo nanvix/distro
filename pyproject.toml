@@ -1,0 +1,8 @@
+[project]
+name = "nanvix-distro"
+requires-python = ">=3.12"
+
+[tool.pyright]
+include = ["z.py", "nanvix_distro"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"

@@ -1,0 +1,21 @@
+name = "javascript"
+
+[[program]]
+source = "runtime"
+path = "bin/procd.elf"
+argv = ["procd"]
+
+[[program]]
+source = "runtime"
+path = "bin/memd.elf"
+argv = ["memd"]
+
+[[program]]
+source = "runtime"
+path = "bin/vfsd.elf"
+argv = ["vfsd"]
+
+[[program]]
+source = "package:quickjs"
+path = "bin/qjs.elf"
+argv = ["qjs"]
