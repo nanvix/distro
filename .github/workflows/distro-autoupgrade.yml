@@ -41,15 +41,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDK_VERSION: ${{ github.event.client_payload.sdk_version || '' }}
-        run: scripts/ci/distro-autoupgrade.sh upgrade
+        run: python3 scripts/ci/distro-autoupgrade.py upgrade
 
       - name: "Install Python Dependencies"
         if: steps.upgrade.outputs.changed == 'true'
-        run: scripts/ci/distro-autoupgrade.sh install-python-dependencies
+        run: python3 scripts/ci/distro-autoupgrade.py install-python-dependencies
 
       - name: "Test Upgraded Release Set"
         if: steps.upgrade.outputs.changed == 'true'
-        run: scripts/ci/distro-autoupgrade.sh test-upgraded-release-set
+        run: python3 scripts/ci/distro-autoupgrade.py test-upgraded-release-set
 
       - name: "Create Pull Request"
         id: create-pr
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
           REPOSITORY: ${{ github.repository }}
-        run: scripts/ci/distro-autoupgrade.sh wait-for-ci
+        run: python3 scripts/ci/distro-autoupgrade.py wait-for-ci
 
       - name: "Merge Pull Request"
         if: steps.ci.outcome == 'success'
@@ -87,4 +87,4 @@ jobs:
           MERGE_HEAD_SHA: ${{ steps.ci.outputs.head-sha }}
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
           REPOSITORY: ${{ github.repository }}
-        run: scripts/ci/distro-autoupgrade.sh merge-pull-request
+        run: python3 scripts/ci/distro-autoupgrade.py merge-pull-request
