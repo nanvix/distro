@@ -59,7 +59,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-        run: scripts/ci/self-hosted-test.sh prepare-release
+        run: python3 scripts/ci/self-hosted-test.py prepare-release
 
   # ==========================================================================================
   # Linux: Build, Unit Test & Smoke Test (Self-Hosted)
@@ -81,12 +81,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: .ci-bootstrap
-          sparse-checkout: scripts/ci/self-hosted-test.sh
+          sparse-checkout: scripts/ci/self-hosted-test.py
           sparse-checkout-cone-mode: false
 
       - name: "Pre-Checkout Cleanup"
         shell: bash
-        run: .ci-bootstrap/scripts/ci/self-hosted-test.sh pre-checkout-cleanup
+        run: python3 .ci-bootstrap/scripts/ci/self-hosted-test.py pre-checkout-cleanup
 
       - uses: actions/checkout@v6
         with:
@@ -96,15 +96,15 @@ jobs:
 
       - name: "Clean Submodule Build Artifacts"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh clean-submodule-build-artifacts
+        run: python3 scripts/ci/self-hosted-test.py clean-submodule-build-artifacts
 
       - name: "Relocate Cargo State"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh relocate-cargo-state
+        run: python3 scripts/ci/self-hosted-test.py relocate-cargo-state
 
       - name: "Setup KVM"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh setup-kvm
+        run: python3 scripts/ci/self-hosted-test.py setup-kvm
 
       - name: "Setup sccache"
         uses: Mozilla-Actions/sccache-action@v0.0.10
@@ -113,31 +113,31 @@ jobs:
 
       - name: "Install Python Dependencies"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh install-python-dependencies
+        run: python3 scripts/ci/self-hosted-test.py install-python-dependencies
 
       - name: "Check Distro Tooling"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh check-distro-tooling
+        run: python3 scripts/ci/self-hosted-test.py check-distro-tooling
 
       - name: "Ensure Docker Daemon"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh ensure-docker-daemon
+        run: python3 scripts/ci/self-hosted-test.py ensure-docker-daemon
 
       - name: "Build"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh build
+        run: python3 scripts/ci/self-hosted-test.py build
 
       - name: "Create Distribution Images"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh create-distribution-images
+        run: python3 scripts/ci/self-hosted-test.py create-distribution-images
 
       - name: "Smoke Test BusyBox Distribution (KVM)"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh smoke-test-busybox
+        run: python3 scripts/ci/self-hosted-test.py smoke-test-busybox
 
       - name: "Smoke Test Composed Distribution"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh smoke-test-composed
+        run: python3 scripts/ci/self-hosted-test.py smoke-test-composed
 
       - name: "Package Release Distribution Images"
         if: |
@@ -145,17 +145,17 @@ jobs:
           github.ref == 'refs/heads/main' &&
           github.repository == 'nanvix/distro'
         shell: bash
-        run: scripts/ci/self-hosted-test.sh package-release-distributions
+        run: python3 scripts/ci/self-hosted-test.py package-release-distributions
 
       - name: "Reclaim Build Space"
         shell: bash
-        run: scripts/ci/self-hosted-test.sh reclaim-build-space
+        run: python3 scripts/ci/self-hosted-test.py reclaim-build-space
 
       - name: "Test"
         shell: bash
         env:
           RUST_LOG: debug
-        run: scripts/ci/self-hosted-test.sh test
+        run: python3 scripts/ci/self-hosted-test.py test
 
       - name: "Stage Release Distribution Images"
         if: |
@@ -167,17 +167,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: scripts/ci/self-hosted-test.sh stage-release-distributions
+        run: python3 scripts/ci/self-hosted-test.py stage-release-distributions
 
       - name: "Remove Relocated Cargo State"
         if: always()
         shell: bash
-        run: scripts/ci/self-hosted-test.sh remove-relocated-cargo-state
+        run: python3 scripts/ci/self-hosted-test.py remove-relocated-cargo-state
 
       - name: "Print sccache Statistics"
         if: always()
         shell: bash
-        run: scripts/ci/self-hosted-test.sh print-sccache-statistics
+        run: python3 scripts/ci/self-hosted-test.py print-sccache-statistics
 
       - name: "Upload logs in case of failures"
         if: failure() || cancelled()
@@ -223,7 +223,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: scripts/ci/self-hosted-test.sh publish-release
+        run: python3 scripts/ci/self-hosted-test.py publish-release
 
   # ==========================================================================================
   # Windows: Build & Test (Self-Hosted)
@@ -252,12 +252,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: .ci-bootstrap
-          sparse-checkout: scripts/ci/self-hosted-test.ps1
+          sparse-checkout: scripts/ci/self-hosted-test.py
           sparse-checkout-cone-mode: false
 
       - name: "Clean Workspace (remove leftover junctions)"
         shell: pwsh
-        run: .\.ci-bootstrap\scripts\ci\self-hosted-test.ps1 clean-workspace
+        run: python .\.ci-bootstrap\scripts\ci\self-hosted-test.py clean-workspace
 
       - uses: actions/checkout@v6
         with:
@@ -265,35 +265,35 @@ jobs:
 
       - name: "Clean Submodule Build Artifacts"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 clean-submodule-build-artifacts
+        run: python .\scripts\ci\self-hosted-test.py clean-submodule-build-artifacts
 
       - name: "Create Short Drive Mapping"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 create-short-drive-mapping
+        run: python .\scripts\ci\self-hosted-test.py create-short-drive-mapping
 
       - name: "Restore Directory Symlinks as Junctions"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 restore-directory-symlinks
+        run: python .\scripts\ci\self-hosted-test.py restore-directory-symlinks
 
       - name: "Refresh PATH from Registry"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 refresh-path
+        run: python .\scripts\ci\self-hosted-test.py refresh-path
 
       - name: "Set Rust Environment"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 set-rust-environment
+        run: python .\scripts\ci\self-hosted-test.py set-rust-environment
 
       - name: "Isolate Cargo Home"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 isolate-cargo-home
+        run: python .\scripts\ci\self-hosted-test.py isolate-cargo-home
 
       - name: "Verify Rust Toolchain"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 verify-rust-toolchain
+        run: python .\scripts\ci\self-hosted-test.py verify-rust-toolchain
 
       - name: "Setup Prerequisites"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 setup-prerequisites
+        run: python .\scripts\ci\self-hosted-test.py setup-prerequisites
 
       - name: "Setup sccache"
         uses: Mozilla-Actions/sccache-action@v0.0.10
@@ -302,11 +302,11 @@ jobs:
 
       - name: "Install Python Dependencies"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 install-python-dependencies
+        run: python .\scripts\ci\self-hosted-test.py install-python-dependencies
 
       - name: "Check Distro Tooling"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 check-distro-tooling
+        run: python .\scripts\ci\self-hosted-test.py check-distro-tooling
 
       - name: "Build & Test Nanvix Core"
         shell: pwsh
@@ -315,23 +315,23 @@ jobs:
           LOG_LEVEL: ${{ matrix.build-type == 'release' && 'error' || 'trace' }}
           TEST_LOG_LEVEL: ${{ matrix.build-type == 'release' && 'debug' || 'trace' }}
           RELEASE_FLAG: ${{ matrix.build-type == 'release' && 'RELEASE=yes' || '' }}
-        run: .\scripts\ci\self-hosted-test.ps1 build-test-nanvix-core
+        run: python .\scripts\ci\self-hosted-test.py build-test-nanvix-core
 
       - name: "Download Pinned Distribution Guests"
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .\scripts\ci\self-hosted-test.ps1 download-pinned-distribution-guests
+        run: python .\scripts\ci\self-hosted-test.py download-pinned-distribution-guests
 
       - name: "Create Distribution Images"
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 create-distribution-images
+        run: python .\scripts\ci\self-hosted-test.py create-distribution-images
 
       - name: "Smoke Test BusyBox Distribution (WHP)"
         shell: pwsh
         env:
           RUST_LOG: debug
-        run: .\scripts\ci\self-hosted-test.ps1 smoke-test-busybox
+        run: python .\scripts\ci\self-hosted-test.py smoke-test-busybox
 
       - name: "Package Release Distribution Images"
         if: |
@@ -340,7 +340,7 @@ jobs:
           github.ref == 'refs/heads/main' &&
           github.repository == 'nanvix/distro'
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 package-release-distributions
+        run: python .\scripts\ci\self-hosted-test.py package-release-distributions
 
       - name: "Stage Release Distribution Images"
         if: |
@@ -353,17 +353,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: .\scripts\ci\self-hosted-test.ps1 stage-release-distributions
+        run: python .\scripts\ci\self-hosted-test.py stage-release-distributions
 
       - name: "Print sccache Statistics"
         if: always()
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 print-sccache-statistics
+        run: python .\scripts\ci\self-hosted-test.py print-sccache-statistics
 
       - name: "Remove Drive Mapping"
         if: always()
         shell: pwsh
-        run: .\scripts\ci\self-hosted-test.ps1 remove-drive-mapping
+        run: python .\scripts\ci\self-hosted-test.py remove-drive-mapping
 
       - name: "Upload logs in case of failures"
         if: failure() || cancelled()
