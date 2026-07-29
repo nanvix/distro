@@ -41,36 +41,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDK_VERSION: ${{ github.event.client_payload.sdk_version || '' }}
-        run: |
-          sdk_args=()
-          if [[ "${EVENT_NAME}" == "repository_dispatch" && -z "${SDK_VERSION}" ]]; then
-            echo "::error::Distro release candidate did not specify an SDK version"
-            exit 1
-          fi
-          if [[ -n "${SDK_VERSION}" ]]; then
-            if [[ ! "${SDK_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-sdk\.[0-9]+$ ]]; then
-              echo "::error::Invalid distro release candidate SDK: ${SDK_VERSION}"
-              exit 1
-            fi
-            sdk_args=(--sdk-version "${SDK_VERSION}")
-          fi
-
-          python3 z.py --verbose upgrade --defer-incomplete-release-set "${sdk_args[@]}"
-          if git diff --quiet HEAD --; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No coherent newer distro release set is available yet"
-            exit 0
-          fi
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "sdk_version=$(jq -r '.sdk_version' config/sdk-release.json)" >> "$GITHUB_OUTPUT"
+        run: scripts/ci/distro-autoupgrade.sh upgrade
 
       - name: "Install Python Dependencies"
         if: steps.upgrade.outputs.changed == 'true'
-        run: python3 -m pip install ./usr/lib/zutils
+        run: scripts/ci/distro-autoupgrade.sh install-python-dependencies
 
       - name: "Test Upgraded Release Set"
         if: steps.upgrade.outputs.changed == 'true'
-        run: python3 -m unittest discover -v
+        run: scripts/ci/distro-autoupgrade.sh test-upgraded-release-set
 
       - name: "Create Pull Request"
         id: create-pr
@@ -99,73 +78,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
           REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          head_sha="$(gh pr view "${PR_NUMBER}" --repo "${REPOSITORY}" --json headRefOid --jq .headRefOid)"
-          head_ref="$(gh pr view "${PR_NUMBER}" --repo "${REPOSITORY}" --json headRefName --jq .headRefName)"
-          run_id=""
-
-          gh workflow run self-hosted-test.yml \
-            --repo "${REPOSITORY}" \
-            --ref "${head_ref}"
-
-          # The workflow_dispatch event may take a few seconds to register its run.
-          for _ in {1..30}; do
-            run_id="$(
-              gh run list \
-                --repo "${REPOSITORY}" \
-                --workflow self-hosted-test.yml \
-                --event workflow_dispatch \
-                --commit "${head_sha}" \
-                --limit 1 \
-                --json databaseId \
-                --jq '.[0].databaseId // empty'
-            )"
-            [[ -n "${run_id}" ]] && break
-            sleep 10
-          done
-
-          if [[ -z "${run_id}" ]]; then
-            echo "::error::Self-Hosted Test did not start for commit ${head_sha}"
-            exit 1
-          fi
-
-          run_status=""
-          conclusion=""
-          for _ in {1..360}; do
-            if run_state="$(
-              gh api \
-                "repos/${REPOSITORY}/actions/runs/${run_id}" \
-                --jq '[.status, (.conclusion // "")] | @tsv' \
-                2>&1
-            )"; then
-              IFS=$'\t' read -r run_status conclusion <<< "${run_state}"
-              [[ "${run_status}" == "completed" ]] && break
-            else
-              echo "::warning::Could not query CI run ${run_id}; retrying: ${run_state}"
-            fi
-            sleep 30
-          done
-
-          if [[ "${run_status}" != "completed" ]]; then
-            echo "::error::Timed out waiting for CI run ${run_id}"
-            exit 1
-          fi
-          if [[ "${conclusion}" != "success" ]]; then
-            echo "::error::CI run ${run_id} concluded ${conclusion}"
-            exit 1
-          fi
-
-          echo "head-sha=${head_sha}" >> "${GITHUB_OUTPUT}"
+        run: scripts/ci/distro-autoupgrade.sh wait-for-ci
 
       - name: "Merge Pull Request"
         if: steps.ci.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr merge \
-            --repo "${{ github.repository }}" \
-            --merge \
-            --match-head-commit "${{ steps.ci.outputs.head-sha }}" \
-            "${{ steps.create-pr.outputs.pull-request-number }}"
+          MERGE_HEAD_SHA: ${{ steps.ci.outputs.head-sha }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          REPOSITORY: ${{ github.repository }}
+        run: scripts/ci/distro-autoupgrade.sh merge-pull-request
