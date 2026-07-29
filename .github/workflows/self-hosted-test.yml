@@ -44,6 +44,11 @@ jobs:
       release-id: ${{ steps.release.outputs.release-id }}
 
     steps:
+      - name: "Checkout CI Scripts"
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci
+
       - name: "Prepare GitHub Release"
         id: release
         if: |
@@ -54,81 +59,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          release_tag="distro-${GITHUB_SHA}"
-          release_title="Nanvix Distribution ${GITHUB_SHA::7}"
-          release_notes="${RUNNER_TEMP}/release-notes.md"
-          releases_json="${RUNNER_TEMP}/releases.json"
-          gh api "repos/${REPOSITORY}/releases?per_page=100" > "${releases_json}"
-
-          release_id="$({
-            python3 - "${releases_json}" "${release_tag}" "${GITHUB_SHA}" <<'PY'
-          import json
-          import sys
-
-          releases_path, expected_tag, expected_commit = sys.argv[1:]
-          with open(releases_path, encoding="utf-8") as releases_file:
-              matches = [
-                  release
-                  for release in json.load(releases_file)
-                  if release["tag_name"] == expected_tag
-              ]
-
-          if len(matches) > 1:
-              raise SystemExit(
-                  f"expected at most one release tagged {expected_tag!r}, found {len(matches)}"
-              )
-          if not matches:
-              raise SystemExit(0)
-
-          release = matches[0]
-          if release["target_commitish"] != expected_commit:
-              raise SystemExit(
-                  f"release targets {release['target_commitish']}, expected {expected_commit}"
-              )
-          if not release["draft"]:
-              raise SystemExit(f"release {release['id']} is already published")
-
-          print(release["id"])
-          PY
-          })"
-
-          if [[ -z "${release_id}" ]]; then
-            cat > "${release_notes}" <<EOF
-          Nanvix distribution images built from merge commit ${GITHUB_SHA}.
-
-          Included configurations:
-          - Linux/KVM: BusyBox
-          - Linux/KVM: CPython
-          - Linux/KVM: QuickJS
-          - Linux/KVM: CPython, QuickJS, and BusyBox
-          - Windows/WHP: BusyBox
-          - Windows/WHP: CPython
-          - Windows/WHP: QuickJS
-          - Windows/WHP: CPython, QuickJS, and BusyBox
-          EOF
-
-            release_id="$({
-              gh api \
-                --method POST \
-                -f tag_name="${release_tag}" \
-                -f target_commitish="${GITHUB_SHA}" \
-                -f name="${release_title}" \
-                -F "body=@${release_notes}" \
-                -F draft=true \
-                -F prerelease=false \
-                "repos/${REPOSITORY}/releases" \
-                --jq .id
-            })"
-          fi
-
-          if [[ ! "${release_id}" =~ ^[0-9]+$ ]]; then
-            echo "::error::Invalid release ID: ${release_id}"
-            exit 1
-          fi
-          echo "release-id=${release_id}" >> "${GITHUB_OUTPUT}"
+        run: scripts/ci/self-hosted-test.sh prepare-release
 
   # ==========================================================================================
   # Linux: Build, Unit Test & Smoke Test (Self-Hosted)
@@ -146,13 +77,16 @@ jobs:
       actions: write
 
     steps:
+      - name: "Checkout Pre-Checkout Cleanup Script"
+        uses: actions/checkout@v6
+        with:
+          path: .ci-bootstrap
+          sparse-checkout: scripts/ci/self-hosted-test.sh
+          sparse-checkout-cone-mode: false
+
       - name: "Pre-Checkout Cleanup"
         shell: bash
-        run: |
-          if [[ -d "${GITHUB_WORKSPACE}/images" ]]; then
-            echo "Removing images directory before checkout..."
-            sudo rm -rf "${GITHUB_WORKSPACE}/images"
-          fi
+        run: .ci-bootstrap/scripts/ci/self-hosted-test.sh pre-checkout-cleanup
 
       - uses: actions/checkout@v6
         with:
@@ -162,26 +96,15 @@ jobs:
 
       - name: "Clean Submodule Build Artifacts"
         shell: bash
-        run: git submodule foreach --recursive git clean -ffdx
+        run: scripts/ci/self-hosted-test.sh clean-submodule-build-artifacts
 
       - name: "Relocate Cargo State"
         shell: bash
-        run: |
-          cargo_home="${HOME}/.cache/nanvix-distro-cargo"
-          cargo_target="${HOME}/.cache/nanvix-distro-target"
-          rm -rf "$cargo_home" "$cargo_target"
-          mkdir -p "$cargo_home" "$cargo_target"
-          ln -sfn "$HOME/.cargo/bin" "$cargo_home/bin"
-          ln -sfn "$cargo_target" nanvix/target
-          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
-          echo "CI_NANVIX_TARGET_DIR=$cargo_target" >> "$GITHUB_ENV"
+        run: scripts/ci/self-hosted-test.sh relocate-cargo-state
 
       - name: "Setup KVM"
         shell: bash
-        run: |
-          sudo modprobe kvm
-          sudo modprobe kvm_intel || sudo modprobe kvm_amd || true
-          sudo chmod 666 /dev/kvm || true
+        run: scripts/ci/self-hosted-test.sh setup-kvm
 
       - name: "Setup sccache"
         uses: Mozilla-Actions/sccache-action@v0.0.10
@@ -190,63 +113,31 @@ jobs:
 
       - name: "Install Python Dependencies"
         shell: bash
-        run: pip install --user --break-system-packages black pyright tomli-w
+        run: scripts/ci/self-hosted-test.sh install-python-dependencies
 
       - name: "Check Distro Tooling"
         shell: bash
-        run: |
-          black --target-version py312 --check z.py nanvix_distro tests
-          pyright
-          python3 -m unittest discover -v
+        run: scripts/ci/self-hosted-test.sh check-distro-tooling
 
       - name: "Ensure Docker Daemon"
         shell: bash
-        run: |
-          if ! docker info &>/dev/null; then
-            echo "::warning::Docker daemon not responding; attempting to start it"
-            sudo systemctl start docker 2>/dev/null \
-              || sudo service docker start 2>/dev/null \
-              || true
-            for attempt in 1 2 3 4 5; do
-              docker info &>/dev/null && break
-              if [[ "$attempt" -lt 5 ]]; then sleep 2; fi
-            done
-          fi
-          docker info
+        run: scripts/ci/self-hosted-test.sh ensure-docker-daemon
 
       - name: "Build"
         shell: bash
-        run: python3 z.py --verbose build
+        run: scripts/ci/self-hosted-test.sh build
 
       - name: "Create Distribution Images"
         shell: bash
-        run: |
-          python3 z.py --verbose dist busybox
-          python3 z.py --verbose dist javascript
-          python3 z.py --verbose dist python
-          python3 z.py --verbose menuconfig ci-composed --include all
+        run: scripts/ci/self-hosted-test.sh create-distribution-images
 
       - name: "Smoke Test BusyBox Distribution (KVM)"
         shell: bash
-        run: |
-          set -o pipefail
-          printf 'exit\n' | timeout 120s \
-            python3 z.py --verbose run busybox 2>&1 \
-            | tee build/dist/busybox/busybox-smoke.log
-          grep -q "NANVIX_BUSYBOX_READY" build/dist/busybox/busybox-smoke.log
+        run: scripts/ci/self-hosted-test.sh smoke-test-busybox
 
       - name: "Smoke Test Composed Distribution"
         shell: bash
-        run: |
-          set -o pipefail
-          {
-            echo "python3 -c 'print(\"PYTHON_COMPONENT_READY\")'"
-            echo "qjs -e 'console.log(\"JAVASCRIPT_COMPONENT_READY\")'"
-            echo "exit"
-          } | timeout 180s python3 z.py --verbose run ci-composed 2>&1 \
-            | tee build/dist/ci-composed/composed-smoke.log
-          grep -q "PYTHON_COMPONENT_READY" build/dist/ci-composed/composed-smoke.log
-          grep -q "JAVASCRIPT_COMPONENT_READY" build/dist/ci-composed/composed-smoke.log
+        run: scripts/ci/self-hosted-test.sh smoke-test-composed
 
       - name: "Package Release Distribution Images"
         if: |
@@ -254,59 +145,17 @@ jobs:
           github.ref == 'refs/heads/main' &&
           github.repository == 'nanvix/distro'
         shell: bash
-        run: |
-          set -euo pipefail
-
-          release_dir="release-distributions"
-          commit_timestamp="$(git show -s --format=%ct "${GITHUB_SHA}")"
-          mkdir -p "${release_dir}"
-
-          package_distribution() {
-            local profile="$1"
-            local components="$2"
-            local source="build/dist/${profile}"
-            local archive="${release_dir}/nanvix-distro-linux-x86-microvm-256mb-${components}-${GITHUB_SHA}.tar.gz"
-
-            if [[ ! -d "${source}" ]]; then
-              echo "::error::Distribution output not found: ${source}"
-              return 1
-            fi
-
-            tar \
-              --sort=name \
-              --mtime="@${commit_timestamp}" \
-              --owner=0 \
-              --group=0 \
-              --numeric-owner \
-              -czf "${archive}" \
-              -C "${source}" \
-              nanvixd.elf \
-              bin/kernel.elf \
-              bin/nanvix.initrd \
-              bin/nanvix.ramfs
-          }
-
-          package_distribution python cpython
-          package_distribution javascript quickjs
-          package_distribution busybox busybox
-          package_distribution ci-composed cpython-quickjs-busybox
+        run: scripts/ci/self-hosted-test.sh package-release-distributions
 
       - name: "Reclaim Build Space"
         shell: bash
-        run: |
-          mkdir -p ci-logs
-          cp build/dist/busybox/busybox-smoke.log ci-logs/
-          cp build/dist/ci-composed/composed-smoke.log ci-logs/
-          rm -rf build
-          git submodule foreach --recursive git clean -ffdx
-          ln -sfn "$CI_NANVIX_TARGET_DIR" nanvix/target
-          df -h "$GITHUB_WORKSPACE" "$HOME"
+        run: scripts/ci/self-hosted-test.sh reclaim-build-space
 
       - name: "Test"
         shell: bash
         env:
           RUST_LOG: debug
-        run: python3 z.py --verbose test
+        run: scripts/ci/self-hosted-test.sh test
 
       - name: "Stage Release Distribution Images"
         if: |
@@ -318,106 +167,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: |
-          set -euo pipefail
-
-          release_id="${RELEASE_ID}"
-          release_assets="${RUNNER_TEMP}/release-assets.json"
-          api_url="${GITHUB_API_URL}/repos/${REPOSITORY}"
-          uploads_url="https://uploads.github.com/repos/${REPOSITORY}"
-          mapfile -t assets < <(
-            find release-distributions -maxdepth 1 -type f -name '*.tar.gz' -print | sort
-          )
-
-          if [[ "${#assets[@]}" -ne 4 ]]; then
-            echo "::error::Expected 4 release distribution images, found ${#assets[@]}"
-            exit 1
-          fi
-
-          if [[ ! "${release_id}" =~ ^[0-9]+$ ]]; then
-            echo "::error::Invalid release ID: ${release_id}"
-            exit 1
-          fi
-
-          api_headers=(
-            --header "Accept: application/vnd.github+json"
-            --header "Authorization: Bearer ${GH_TOKEN}"
-            --header "X-GitHub-Api-Version: 2022-11-28"
-          )
-          curl \
-            --fail-with-body \
-            --silent \
-            --show-error \
-            --location \
-            "${api_headers[@]}" \
-            --output "${release_assets}" \
-            "${api_url}/releases/${release_id}/assets?per_page=100"
-
-          for asset in "${assets[@]}"; do
-            asset_name="$(basename "${asset}")"
-            while IFS= read -r asset_id; do
-              curl \
-                --fail-with-body \
-                --silent \
-                --show-error \
-                --location \
-                --request DELETE \
-                "${api_headers[@]}" \
-                "${api_url}/releases/assets/${asset_id}"
-            done < <(
-              python3 - "${release_assets}" "${asset_name}" <<'PY'
-          import json
-          import sys
-
-          assets_path, expected_name = sys.argv[1:]
-          with open(assets_path, encoding="utf-8") as release_assets:
-              for asset in json.load(release_assets):
-                  if asset["name"] == expected_name:
-                      print(asset["id"])
-          PY
-            )
-
-            upload_json="${RUNNER_TEMP}/${asset_name}.json"
-            curl \
-              --fail-with-body \
-              --silent \
-              --show-error \
-              --location \
-              --request POST \
-              "${api_headers[@]}" \
-              --header "Content-Type: application/gzip" \
-              --data-binary "@${asset}" \
-              --output "${upload_json}" \
-              "${uploads_url}/releases/${release_id}/assets?name=${asset_name}"
-            python3 - "${upload_json}" "${asset_name}" <<'PY'
-          import json
-          import sys
-
-          response_path, expected_name = sys.argv[1:]
-          with open(response_path, encoding="utf-8") as response:
-              asset = json.load(response)
-          if asset.get("name") != expected_name:
-              raise SystemExit(f"uploaded asset has unexpected name: {asset.get('name')!r}")
-          if asset.get("state") != "uploaded" or asset.get("size", 0) <= 0:
-              raise SystemExit(f"uploaded asset is incomplete: {asset!r}")
-          PY
-          done
+        run: scripts/ci/self-hosted-test.sh stage-release-distributions
 
       - name: "Remove Relocated Cargo State"
         if: always()
         shell: bash
-        run: |
-          df -h "$GITHUB_WORKSPACE" "$HOME"
-          if [[ -L nanvix/target ]]; then rm -f nanvix/target; fi
-          rm -rf \
-            "${HOME}/.cache/nanvix-distro-cargo" \
-            "${HOME}/.cache/nanvix-distro-target"
+        run: scripts/ci/self-hosted-test.sh remove-relocated-cargo-state
 
       - name: "Print sccache Statistics"
         if: always()
         shell: bash
-        run: |
-          if command -v sccache &>/dev/null; then sccache --show-stats; fi
+        run: scripts/ci/self-hosted-test.sh print-sccache-statistics
 
       - name: "Upload logs in case of failures"
         if: failure() || cancelled()
@@ -452,92 +212,18 @@ jobs:
       contents: write
 
     steps:
+      - name: "Checkout CI Scripts"
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci
+
       - name: "Publish GitHub Release"
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: |
-          set -euo pipefail
-
-          release_tag="distro-${GITHUB_SHA}"
-          release_id="${RELEASE_ID}"
-          release_json="${RUNNER_TEMP}/release.json"
-          published_json="${RUNNER_TEMP}/published-release.json"
-          if [[ ! "${release_id}" =~ ^[0-9]+$ ]]; then
-            echo "::error::Invalid release ID: ${release_id}"
-            exit 1
-          fi
-          gh api "repos/${REPOSITORY}/releases/${release_id}" > "${release_json}"
-
-          python3 - "${release_json}" "${release_tag}" "${GITHUB_SHA}" <<'PY'
-          import json
-          import sys
-
-          release_path, expected_tag, expected_commit = sys.argv[1:]
-          with open(release_path, encoding="utf-8") as release_file:
-              release = json.load(release_file)
-          if release["tag_name"] != expected_tag:
-              raise SystemExit(f"release has unexpected tag: {release['tag_name']!r}")
-          if release["target_commitish"] != expected_commit:
-              raise SystemExit(
-                  f"release targets {release['target_commitish']}, expected {expected_commit}"
-              )
-
-          expected_assets = {
-              f"nanvix-distro-linux-x86-microvm-256mb-busybox-{expected_commit}.tar.gz",
-              f"nanvix-distro-linux-x86-microvm-256mb-cpython-{expected_commit}.tar.gz",
-              f"nanvix-distro-linux-x86-microvm-256mb-cpython-quickjs-busybox-{expected_commit}.tar.gz",
-              f"nanvix-distro-linux-x86-microvm-256mb-quickjs-{expected_commit}.tar.gz",
-              f"nanvix-distro-windows-x86-microvm-256mb-busybox-{expected_commit}.zip",
-              f"nanvix-distro-windows-x86-microvm-256mb-cpython-{expected_commit}.zip",
-                f"nanvix-distro-windows-x86-microvm-256mb-cpython-quickjs-busybox-{expected_commit}.zip",
-              f"nanvix-distro-windows-x86-microvm-256mb-quickjs-{expected_commit}.zip",
-          }
-          assets = release["assets"]
-          actual_assets = {asset["name"] for asset in assets}
-          if actual_assets != expected_assets or len(assets) != len(expected_assets):
-              raise SystemExit(
-                "Expected 8 release distribution images. "
-                "Release assets do not match the expected distribution set: "
-                  f"expected={sorted(expected_assets)!r}, actual={sorted(actual_assets)!r}"
-              )
-
-          invalid_assets = [
-              asset
-              for asset in assets
-              if asset["size"] <= 0 or asset["state"] != "uploaded"
-          ]
-          if invalid_assets:
-              raise SystemExit(f"release has incomplete assets: {invalid_assets!r}")
-          PY
-
-          gh api \
-            --method PATCH \
-            -f tag_name="${release_tag}" \
-            -f target_commitish="${GITHUB_SHA}" \
-            -F draft=false \
-            -f make_latest=true \
-            "repos/${REPOSITORY}/releases/${release_id}" \
-            > "${published_json}"
-
-          python3 - "${published_json}" "${release_tag}" "${GITHUB_SHA}" <<'PY'
-          import json
-          import sys
-
-          release_path, expected_tag, expected_commit = sys.argv[1:]
-          with open(release_path, encoding="utf-8") as release_file:
-              release = json.load(release_file)
-          if release["tag_name"] != expected_tag:
-              raise SystemExit(f"published release has unexpected tag: {release['tag_name']!r}")
-          if release["target_commitish"] != expected_commit:
-              raise SystemExit(
-                  f"published release targets {release['target_commitish']}, expected {expected_commit}"
-              )
-          if release["draft"] or release["published_at"] is None:
-              raise SystemExit("release is still a draft")
-          PY
+        run: scripts/ci/self-hosted-test.sh publish-release
 
   # ==========================================================================================
   # Windows: Build & Test (Self-Hosted)
@@ -562,19 +248,16 @@ jobs:
       actions: write
 
     steps:
+      - name: "Checkout Pre-Checkout Cleanup Script"
+        uses: actions/checkout@v6
+        with:
+          path: .ci-bootstrap
+          sparse-checkout: scripts/ci/self-hosted-test.ps1
+          sparse-checkout-cone-mode: false
+
       - name: "Clean Workspace (remove leftover junctions)"
         shell: pwsh
-        run: |
-          # Remove any leftover NTFS junctions from a prior run before checkout
-          # tries to recursively delete the workspace. Junctions confuse recursive
-          # deletes on Windows.
-          if (Test-Path "$env:GITHUB_WORKSPACE\nanvix") {
-            Get-ChildItem -Path "$env:GITHUB_WORKSPACE\nanvix" -Recurse -Force -Directory |
-              Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } |
-              ForEach-Object { cmd /c rmdir $_.FullName 2>$null; Write-Host "Removed junction: $($_.FullName)" }
-          }
-          # Remove stale drive mapping if present
-          if (Test-Path N:\) { subst N: /D }
+        run: .\.ci-bootstrap\scripts\ci\self-hosted-test.ps1 clean-workspace
 
       - uses: actions/checkout@v6
         with:
@@ -582,90 +265,35 @@ jobs:
 
       - name: "Clean Submodule Build Artifacts"
         shell: pwsh
-        run: git submodule foreach --recursive git clean -ffdx
+        run: .\scripts\ci\self-hosted-test.ps1 clean-submodule-build-artifacts
 
       - name: "Create Short Drive Mapping"
-        shell: cmd
-        run: |
-          REM Map the workspace to a short drive letter to keep absolute paths
-          REM under cmd.exe's 8191-char limit when Make builds long mkimage commands.
-          REM Using subst preserves relative path resolution (../) so git submodule
-          REM gitlinks continue to work correctly.
-          if exist N:\ subst N: /D
-          subst N: "%GITHUB_WORKSPACE%"
-          dir N:\nanvix\Makefile
+        shell: pwsh
+        run: .\scripts\ci\self-hosted-test.ps1 create-short-drive-mapping
 
       - name: "Restore Directory Symlinks as Junctions"
         shell: pwsh
-        working-directory: N:\nanvix
-        run: |
-          git ls-files -s | ForEach-Object {
-            if ($_ -match '^120000\s+\S+\s+\S+\t(.+)$') {
-              $relPath = $Matches[1]
-              $fullPath = Join-Path $PWD $relPath
-              if ((Test-Path $fullPath) -and -not (Test-Path $fullPath -PathType Container)) {
-                $target = (Get-Content $fullPath -Raw).Trim()
-                if (-not $target -or $target.Length -gt 500) { return }
-                $parentDir = Split-Path $fullPath
-                $resolved = [System.IO.Path]::GetFullPath((Join-Path $parentDir $target))
-                if (Test-Path $resolved -PathType Container) {
-                  Remove-Item $fullPath -Force
-                  cmd /c mklink /J "$fullPath" "$resolved" | Out-Null
-                  Write-Host "Junction: $relPath -> $target"
-                } elseif (Test-Path $resolved -PathType Leaf) {
-                  Copy-Item $resolved $fullPath -Force
-                  Write-Host "Copied: $relPath -> $target"
-                }
-              }
-            }
-          }
+        run: .\scripts\ci\self-hosted-test.ps1 restore-directory-symlinks
 
       - name: "Refresh PATH from Registry"
         shell: pwsh
-        run: |
-          $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-          $userPath    = [Environment]::GetEnvironmentVariable("Path", "User")
-          $env:PATH    = "$machinePath;$userPath"
-          echo "PATH=$env:PATH" >> $env:GITHUB_ENV
+        run: .\scripts\ci\self-hosted-test.ps1 refresh-path
 
       - name: "Set Rust Environment"
         shell: pwsh
-        run: |
-          echo "CARGO_HOME=C:\Users\Administrator\.cargo" >> $env:GITHUB_ENV
+        run: .\scripts\ci\self-hosted-test.ps1 set-rust-environment
 
       - name: "Isolate Cargo Home"
         shell: pwsh
-        run: |
-          $cargoTarget = Join-Path $env:CARGO_HOME "bin"
-          $isolatedCargo = Join-Path $env:RUNNER_TEMP ".cargo"
-          New-Item -ItemType Directory -Force -Path $isolatedCargo | Out-Null
-          $cargoBin = Join-Path $isolatedCargo "bin"
-          if (Test-Path $cargoBin) { Remove-Item $cargoBin -Force -Recurse }
-          cmd /c "mklink /J `"$cargoBin`" `"$cargoTarget`"" | Out-Null
-          echo "CARGO_HOME=$isolatedCargo" >> $env:GITHUB_ENV
-          Write-Host "Isolated CARGO_HOME to $isolatedCargo"
+        run: .\scripts\ci\self-hosted-test.ps1 isolate-cargo-home
 
       - name: "Verify Rust Toolchain"
         shell: pwsh
-        working-directory: N:\nanvix
-        run: |
-          $toolchain = (Get-Content rust-toolchain | Select-String '^channel\s*=').ToString() -replace '.*=\s*"([^"]+)".*','$1'
-          Write-Host "Expected toolchain: $toolchain"
-          rustup show
-          cargo --version
+        run: .\scripts\ci\self-hosted-test.ps1 verify-rust-toolchain
 
       - name: "Setup Prerequisites"
         shell: pwsh
-        working-directory: N:\nanvix
-        run: |
-          $osVersion = [System.Environment]::OSVersion.Version
-          if ($osVersion.Build -ge 22000) {
-            Write-Host "Detected Windows build $($osVersion.Build) (Windows 11 or later). Running z.ps1 setup..."
-            .\z.ps1 setup
-          }
-          else {
-            Write-Host "Detected Windows build $($osVersion.Build) (< 22000). Skipping z.ps1 setup on CI runner."
-          }
+        run: .\scripts\ci\self-hosted-test.ps1 setup-prerequisites
 
       - name: "Setup sccache"
         uses: Mozilla-Actions/sccache-action@v0.0.10
@@ -674,175 +302,36 @@ jobs:
 
       - name: "Install Python Dependencies"
         shell: pwsh
-        run: python -m pip install black pyright tomli-w
+        run: .\scripts\ci\self-hosted-test.ps1 install-python-dependencies
 
       - name: "Check Distro Tooling"
         shell: pwsh
-        run: |
-          python -m black --target-version py312 --check z.py nanvix_distro tests
-          python -m pyright
-          python -m unittest discover -v
+        run: .\scripts\ci\self-hosted-test.ps1 check-distro-tooling
 
       - name: "Build & Test Nanvix Core"
         shell: pwsh
-        working-directory: N:\nanvix
         env:
           MACHINE_TYPE: ${{ matrix.machine-type }}
           LOG_LEVEL: ${{ matrix.build-type == 'release' && 'error' || 'trace' }}
           TEST_LOG_LEVEL: ${{ matrix.build-type == 'release' && 'debug' || 'trace' }}
           RELEASE_FLAG: ${{ matrix.build-type == 'release' && 'RELEASE=yes' || '' }}
-        run: |
-          # Invoke make directly from the subst drive so $(CURDIR) = N:/nanvix
-          # (short paths that fit within cmd.exe's 8191-char limit).
-          # z.py resolves through subst to the real path, defeating the purpose,
-          # so we replicate its essential setup and call make directly.
-          $env:HOME = $env:USERPROFILE -replace '\\','/'
-          $gitRoot = Split-Path (Split-Path (Get-Command git).Source)
-          $gitUsrBin = Join-Path $gitRoot "usr\bin"
-          if (Test-Path $gitUsrBin) { $env:PATH += ";$gitUsrBin" }
-          $makeArgs = @(
-            "DEPLOYMENT_MODE=standalone",
-            "WHP=yes",
-            "SYSROOT_DIR=N:/build/sysroot"
-          )
-          if ($env:RELEASE_FLAG) { $makeArgs += $env:RELEASE_FLAG }
-          $testMakeArgs = $makeArgs + @(
-            "all",
-            "test",
-            "MACHINE=$env:MACHINE_TYPE",
-            "LOG_LEVEL=$env:TEST_LOG_LEVEL"
-          )
-          Write-Host "[INFO] make $($testMakeArgs -join ' ')"
-          & make @testMakeArgs
-          if ($LASTEXITCODE -ne 0) { Write-Error "Build or tests failed."; exit $LASTEXITCODE }
-
-          $installMakeArgs = $makeArgs + @(
-            "install",
-            "MACHINE=$env:MACHINE_TYPE",
-            "LOG_LEVEL=$env:LOG_LEVEL"
-          )
-          Write-Host "[INFO] make $($installMakeArgs -join ' ')"
-          & make @installMakeArgs
-          if ($LASTEXITCODE -ne 0) { Write-Error "Install failed."; exit $LASTEXITCODE }
+        run: .\scripts\ci\self-hosted-test.ps1 build-test-nanvix-core
 
       - name: "Download Pinned Distribution Guests"
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $headers = @{
-            Accept = "application/vnd.github+json"
-            Authorization = "Bearer $env:GH_TOKEN"
-            "X-GitHub-Api-Version" = "2022-11-28"
-          }
-          $packages = @(
-            @{
-              Name = "busybox"
-              Asset = "busybox-windows-x86-microvm-standalone-256mb.zip"
-              Required = @("bin\busybox.elf")
-            },
-            @{
-              Name = "quickjs"
-              Asset = "quickjs-windows-x86-microvm-standalone-256mb.zip"
-              Required = @("bin\qjs.elf")
-            },
-            @{
-              Name = "cpython"
-              Asset = "cpython-windows-x86-microvm-standalone-256mb.zip"
-              Required = @("bin\python.elf", "cpython-ramfs.img")
-            }
-          )
-
-          foreach ($package in $packages) {
-            $name = $package.Name
-            $repository = "usr/bin/$name"
-            git -C $repository fetch --tags --force origin
-            if ($LASTEXITCODE -ne 0) {
-              throw "Cannot fetch $name release tags"
-            }
-            $tag = git -C $repository describe --tags --exact-match
-            if ($LASTEXITCODE -ne 0 -or -not $tag) {
-              throw "$name gitlink is not at a release tag"
-            }
-
-            $asset = $package.Asset
-            $releaseUrl = "https://api.github.com/repos/nanvix/$name/releases/tags/$tag"
-            $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
-            $matches = @($release.assets | Where-Object { $_.name -eq $asset })
-            if ($matches.Count -ne 1) {
-              throw "Pinned $name release does not publish exactly one $asset"
-            }
-            $metadata = $matches[0]
-            if (-not ($metadata.digest -is [string]) -or
-                -not $metadata.digest.StartsWith("sha256:")) {
-              throw "Pinned $name release does not publish a SHA-256 digest for $asset"
-            }
-
-            $archive = Join-Path $env:RUNNER_TEMP $asset
-            $destination = Join-Path $env:GITHUB_WORKSPACE "build\deps\$name"
-            if (Test-Path $destination) {
-              Remove-Item -Recurse -Force $destination
-            }
-            New-Item -ItemType Directory -Force -Path $destination | Out-Null
-            Invoke-WebRequest -Uri $metadata.browser_download_url -OutFile $archive
-            $expectedDigest = $metadata.digest.Substring("sha256:".Length)
-            $actualDigest = (Get-FileHash -Path $archive -Algorithm SHA256).Hash
-            if ($actualDigest -ine $expectedDigest) {
-              throw "Pinned $name archive SHA-256 digest mismatch"
-            }
-            Expand-Archive -Path $archive -DestinationPath $destination -Force
-
-            foreach ($required in $package.Required) {
-              $requiredPath = Join-Path $destination $required
-              if (-not (Test-Path $requiredPath -PathType Leaf)) {
-                throw "Pinned $name archive does not contain $required"
-              }
-              Get-Item $requiredPath | Format-Table FullName, Length
-            }
-          }
+        run: .\scripts\ci\self-hosted-test.ps1 download-pinned-distribution-guests
 
       - name: "Create Distribution Images"
         shell: pwsh
-        run: |
-          python z.py --verbose dist busybox
-          python z.py --verbose dist javascript
-          python z.py --verbose dist python
-          python z.py --verbose menuconfig ci-composed --include all
+        run: .\scripts\ci\self-hosted-test.ps1 create-distribution-images
 
       - name: "Smoke Test BusyBox Distribution (WHP)"
         shell: pwsh
         env:
           RUST_LOG: debug
-        run: |
-          $dist = Join-Path $env:GITHUB_WORKSPACE "build\dist\busybox"
-          $stdin = Join-Path $env:RUNNER_TEMP "busybox-stdin.txt"
-          $stdout = Join-Path $env:RUNNER_TEMP "busybox-stdout.txt"
-          $stderr = Join-Path $env:RUNNER_TEMP "busybox-stderr.txt"
-          $log = Join-Path $dist "busybox-smoke.log"
-          Set-Content -Path $stdin -Value "exit" -Encoding ascii
-
-          $proc = Start-Process -FilePath (Get-Command python).Source `
-            -ArgumentList @("z.py", "--verbose", "run", "busybox") `
-            -WorkingDirectory $env:GITHUB_WORKSPACE `
-            -PassThru -NoNewWindow `
-            -RedirectStandardInput $stdin `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr
-
-          if (-not $proc.WaitForExit(120000)) {
-            $proc.Kill($true)
-            throw "WHP smoke test timed out after 120 seconds"
-          }
-          $proc.WaitForExit()
-
-          Get-Content $stdout, $stderr -ErrorAction SilentlyContinue |
-            Tee-Object -FilePath $log
-          if ($proc.ExitCode -ne 0) {
-            throw "WHP smoke test failed with exit code $($proc.ExitCode)"
-          }
-          if (-not (Select-String -Path $log -Pattern "NANVIX_BUSYBOX_READY" -Quiet)) {
-            throw "WHP smoke marker not found"
-          }
+        run: .\scripts\ci\self-hosted-test.ps1 smoke-test-busybox
 
       - name: "Package Release Distribution Images"
         if: |
@@ -851,67 +340,7 @@ jobs:
           github.ref == 'refs/heads/main' &&
           github.repository == 'nanvix/distro'
         shell: pwsh
-        run: |
-          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "release-distributions"
-          $commitTimestampSeconds = git show -s --format=%ct $env:GITHUB_SHA
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot resolve commit timestamp for $env:GITHUB_SHA"
-          }
-          $commitTimestamp = [DateTimeOffset]::FromUnixTimeSeconds(
-            [long]$commitTimestampSeconds
-          ).UtcDateTime
-          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-
-          function Package-Distribution {
-            param(
-              [string]$Profile,
-              [string]$Components
-            )
-
-            $source = Join-Path $env:GITHUB_WORKSPACE "build\dist\$Profile"
-            $archiveName = "nanvix-distro-windows-x86-microvm-256mb-$Components-$($env:GITHUB_SHA).zip"
-            $archive = Join-Path $releaseDir $archiveName
-            $required = @(
-              "nanvixd.exe",
-              "bin\kernel.elf",
-              "bin\nanvix.initrd",
-              "bin\nanvix.ramfs"
-            )
-
-            if (-not (Test-Path $source -PathType Container)) {
-              throw "Distribution output not found: $source"
-            }
-            foreach ($path in $required) {
-              if (-not (Test-Path (Join-Path $source $path) -PathType Leaf)) {
-                throw "Distribution artifact not found: $Profile/$path"
-              }
-            }
-
-            Get-ChildItem -LiteralPath $source -Recurse -Force | ForEach-Object {
-              $_.LastWriteTimeUtc = $commitTimestamp
-            }
-            if (Test-Path $archive) {
-              Remove-Item -Force $archive
-            }
-            Push-Location $source
-            try {
-              Compress-Archive `
-                -Path @("nanvixd.exe", "bin") `
-                -DestinationPath $archive `
-                -CompressionLevel Optimal
-            }
-            finally {
-              Pop-Location
-            }
-            if ((Get-Item $archive).Length -le 0) {
-              throw "Distribution archive is empty: $archive"
-            }
-          }
-
-          Package-Distribution python cpython
-          Package-Distribution javascript quickjs
-          Package-Distribution busybox busybox
-          Package-Distribution ci-composed cpython-quickjs-busybox
+        run: .\scripts\ci\self-hosted-test.ps1 package-release-distributions
 
       - name: "Stage Release Distribution Images"
         if: |
@@ -924,71 +353,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}
-        run: |
-          $releaseId = $env:RELEASE_ID
-          if ($releaseId -notmatch '^\d+$') {
-            throw "Invalid release ID: $releaseId"
-          }
-          $apiUrl = "$env:GITHUB_API_URL/repos/$env:REPOSITORY"
-          $uploadsUrl = "https://uploads.github.com/repos/$env:REPOSITORY"
-          $headers = @{
-            Accept = "application/vnd.github+json"
-            Authorization = "Bearer $env:GH_TOKEN"
-            "X-GitHub-Api-Version" = "2022-11-28"
-          }
-          $assets = @(
-            Get-ChildItem `
-              -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "release-distributions") `
-              -File `
-              -Filter "*.zip" |
-              Sort-Object Name
-          )
-
-          if ($assets.Count -ne 4) {
-            throw "Expected 4 Windows release distribution images, found $($assets.Count)"
-          }
-
-          $releaseAssets = @(
-            Invoke-RestMethod `
-              -Uri "$apiUrl/releases/$releaseId/assets?per_page=100" `
-              -Headers $headers
-          )
-          foreach ($asset in $assets) {
-            foreach ($existing in @(
-              $releaseAssets | Where-Object { $_.name -eq $asset.Name }
-            )) {
-              Invoke-RestMethod `
-                -Method Delete `
-                -Uri "$apiUrl/releases/assets/$($existing.id)" `
-                -Headers $headers
-            }
-
-            $assetName = [Uri]::EscapeDataString($asset.Name)
-            $uploaded = Invoke-RestMethod `
-              -Method Post `
-              -Uri "$uploadsUrl/releases/$releaseId/assets?name=$assetName" `
-              -Headers $headers `
-              -ContentType "application/zip" `
-              -InFile $asset.FullName
-            if ($uploaded.name -ne $asset.Name) {
-              throw "Uploaded asset has unexpected name: $($uploaded.name)"
-            }
-            if ($uploaded.state -ne "uploaded" -or $uploaded.size -le 0) {
-              throw "Uploaded asset is incomplete: $($uploaded | ConvertTo-Json -Compress)"
-            }
-          }
+        run: .\scripts\ci\self-hosted-test.ps1 stage-release-distributions
 
       - name: "Print sccache Statistics"
         if: always()
         shell: pwsh
-        run: |
-          if (Get-Command sccache -ErrorAction SilentlyContinue) { sccache --show-stats }
+        run: .\scripts\ci\self-hosted-test.ps1 print-sccache-statistics
 
       - name: "Remove Drive Mapping"
         if: always()
-        shell: cmd
-        run: |
-          if exist N:\ subst N: /D
+        shell: pwsh
+        run: .\scripts\ci\self-hosted-test.ps1 remove-drive-mapping
 
       - name: "Upload logs in case of failures"
         if: failure() || cancelled()

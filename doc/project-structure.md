@@ -7,6 +7,7 @@ nanvix_distro/               Typed SDK contract and image-profile helpers
 profiles/                    Named TOML distribution profiles
 profiles/rootfs/             Guest files copied by named profiles
 distributions/<name>/        Reusable menuconfig-generated profiles
+scripts/ci/                  Standalone CI workflow task runners
 nanvix/                      Nanvix kernel, daemons, and host tools
 usr/bin/                     Binary and mixed userspace package submodules
 usr/lib/                     Library and zutils submodules

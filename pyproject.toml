@@ -3,6 +3,6 @@ name = "nanvix-distro"
 requires-python = ">=3.12"
 
 [tool.pyright]
-include = ["z.py", "nanvix_distro"]
+include = ["z.py", "nanvix_distro", "scripts/ci"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"

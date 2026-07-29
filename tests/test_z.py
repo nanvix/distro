@@ -42,11 +42,18 @@ from z import (
 class WorkflowConfigurationTests(unittest.TestCase):
     """Verify CI exercises both supported host hypervisors."""
 
+    ROOT = Path(__file__).parents[1]
+
+    @classmethod
+    def read_project_file(cls, path: str) -> str:
+        """Read a workflow or its standalone implementation script."""
+        return (cls.ROOT / path).read_text(encoding="utf-8")
+
     def test_ci_builds_and_runs_distributions_on_linux_and_windows(self) -> None:
         """Both host jobs build the distro and smoke-test the public run command."""
-        workflow = (
-            Path(__file__).parents[1] / ".github/workflows/self-hosted-test.yml"
-        ).read_text(encoding="utf-8")
+        workflow = self.read_project_file(".github/workflows/self-hosted-test.yml")
+        linux_script = self.read_project_file("scripts/ci/self-hosted-test.sh")
+        windows_script = self.read_project_file("scripts/ci/self-hosted-test.ps1")
 
         self.assertIn('name: "Linux Build & Test"', workflow)
         self.assertIn(
@@ -54,58 +61,62 @@ class WorkflowConfigurationTests(unittest.TestCase):
         )
         self.assertIn('name: "Smoke Test BusyBox Distribution (KVM)"', workflow)
         self.assertIn('name: "Smoke Test BusyBox Distribution (WHP)"', workflow)
-        self.assertIn("python3 z.py --verbose build", workflow)
+        self.assertIn("python3 z.py --verbose build", linux_script)
         self.assertIn('name: "Download Pinned Distribution Guests"', workflow)
         for package in ("busybox", "quickjs", "cpython"):
             self.assertIn(
-                f"{package}-windows-x86-microvm-standalone-256mb.zip", workflow
+                f"{package}-windows-x86-microvm-standalone-256mb.zip",
+                windows_script,
             )
         for profile in ("busybox", "javascript", "python"):
-            self.assertIn(f"python z.py --verbose dist {profile}", workflow)
+            self.assertIn(f"python z.py --verbose dist {profile}", windows_script)
         self.assertIn(
-            "python z.py --verbose menuconfig ci-composed --include all", workflow
+            "python z.py --verbose menuconfig ci-composed --include all",
+            windows_script,
         )
-        self.assertIn("Get-FileHash -Path $archive -Algorithm SHA256", workflow)
-        self.assertIn("SYSROOT_DIR=N:/build/sysroot", workflow)
-        self.assertIn('"install",', workflow)
+        self.assertIn("Get-FileHash -Path $archive -Algorithm SHA256", windows_script)
+        self.assertIn("SYSROOT_DIR=N:/build/sysroot", windows_script)
+        self.assertIn('"install",', windows_script)
         self.assertIn("'release' || 'debug'", workflow)
         self.assertEqual(workflow.count("matrix.build-type == 'release' &&"), 5)
-        self.assertIn("python3 z.py --verbose run busybox", workflow)
-        self.assertIn('@("z.py", "--verbose", "run", "busybox")', workflow)
+        self.assertIn("python3 z.py --verbose run busybox", linux_script)
+        self.assertIn('@("z.py", "--verbose", "run", "busybox")', windows_script)
         self.assertIn('PYTHONUTF8: "1"', workflow)
-        self.assertEqual(workflow.count("NANVIX_BUSYBOX_READY"), 2)
+        self.assertEqual(
+            linux_script.count("NANVIX_BUSYBOX_READY")
+            + windows_script.count("NANVIX_BUSYBOX_READY"),
+            2,
+        )
         self.assertEqual(workflow.count("continue-on-error: true"), 2)
 
     def test_windows_release_tests_enable_kernel_success_marker(self) -> None:
         """Release tests retain the debug marker without changing artifact logging."""
-        workflow = (
-            Path(__file__).parents[1] / ".github/workflows/self-hosted-test.yml"
-        ).read_text(encoding="utf-8")
+        workflow = self.read_project_file(".github/workflows/self-hosted-test.yml")
+        windows_script = self.read_project_file("scripts/ci/self-hosted-test.ps1")
 
         self.assertIn(
             "TEST_LOG_LEVEL: ${{ matrix.build-type == 'release' && 'debug' || 'trace' }}",
             workflow,
         )
-        self.assertIn('"LOG_LEVEL=$env:TEST_LOG_LEVEL"', workflow)
-        self.assertIn('"LOG_LEVEL=$env:LOG_LEVEL"', workflow)
+        self.assertIn('"LOG_LEVEL=$env:TEST_LOG_LEVEL"', windows_script)
+        self.assertIn('"LOG_LEVEL=$env:LOG_LEVEL"', windows_script)
         self.assertLess(
-            workflow.index("& make @testMakeArgs"),
-            workflow.index("& make @installMakeArgs"),
+            windows_script.index("& make @testMakeArguments"),
+            windows_script.index("& make @installMakeArguments"),
         )
 
     def test_autoupgrade_installs_upgraded_zutils_dependencies(self) -> None:
         """Autoupgrade tests run with dependencies from the selected zutils release."""
-        workflow = (
-            Path(__file__).parents[1] / ".github/workflows/distro-autoupgrade.yml"
-        ).read_text(encoding="utf-8")
-        upgrade = "python3 z.py --verbose upgrade"
-        install = "python3 -m pip install ./usr/lib/zutils"
-        test = "python3 -m unittest discover -v"
+        workflow = self.read_project_file(".github/workflows/distro-autoupgrade.yml")
+        script = self.read_project_file("scripts/ci/distro-autoupgrade.sh")
+        upgrade = "scripts/ci/distro-autoupgrade.sh upgrade"
+        install = "scripts/ci/distro-autoupgrade.sh install-python-dependencies"
+        test = "scripts/ci/distro-autoupgrade.sh test-upgraded-release-set"
 
         self.assertLess(workflow.index(upgrade), workflow.index(install))
         self.assertLess(workflow.index(install), workflow.index(test))
-        self.assertIn("--defer-incomplete-release-set", workflow)
-        self.assertIn("git diff --quiet HEAD --", workflow)
+        self.assertIn("--defer-incomplete-release-set", script)
+        self.assertIn("git diff --quiet HEAD --", script)
         self.assertIn("github.repository == 'nanvix/distro'", workflow)
         self.assertNotIn("nanvix/nanvix-distro", workflow)
         self.assertEqual(
@@ -115,26 +126,27 @@ class WorkflowConfigurationTests(unittest.TestCase):
 
     def test_autoupgrade_retries_exact_coordinated_release_candidate(self) -> None:
         """The final consumer tier triggers an exact, preflighted SDK upgrade."""
-        workflow = (
-            Path(__file__).parents[1] / ".github/workflows/distro-autoupgrade.yml"
-        ).read_text(encoding="utf-8")
+        workflow = self.read_project_file(".github/workflows/distro-autoupgrade.yml")
+        script = self.read_project_file("scripts/ci/distro-autoupgrade.sh")
 
         self.assertIn('cron: "0 20 * * *"', workflow)
         self.assertIn("types: [distro-release-candidate]", workflow)
         self.assertIn("github.event.client_payload.sdk_version", workflow)
         self.assertIn(
             '[[ "${EVENT_NAME}" == "repository_dispatch" && -z "${SDK_VERSION}" ]]',
-            workflow,
+            script,
         )
-        self.assertIn('sdk_args=(--sdk-version "${SDK_VERSION}")', workflow)
+        self.assertIn('sdk_args=(--sdk-version "${SDK_VERSION}")', script)
         self.assertNotIn("github.event.client_payload.release_tag", workflow)
-        self.assertIn('"${sdk_args[@]}"', workflow)
+        self.assertIn('"${sdk_args[@]}"', script)
 
     def test_ci_publishes_eight_release_distributions_after_merges(self) -> None:
         """Main-branch pushes publish the supported distribution combinations."""
-        workflow = (
-            Path(__file__).parents[1] / ".github/workflows/self-hosted-test.yml"
-        ).read_text(encoding="utf-8")
+        workflow = self.read_project_file(".github/workflows/self-hosted-test.yml")
+        linux_script = self.read_project_file("scripts/ci/self-hosted-test.sh")
+        windows_script = self.read_project_file("scripts/ci/self-hosted-test.ps1")
+        release_helper = self.read_project_file("scripts/ci/self-hosted-test.py")
+        implementation = "\n".join((linux_script, windows_script, release_helper))
 
         self.assertIn("publish-release-distributions:", workflow)
         self.assertIn('name: "Publish Release Distribution Images"', workflow)
@@ -158,60 +170,128 @@ class WorkflowConfigurationTests(unittest.TestCase):
             3,
         )
         self.assertEqual(workflow.count('name: "Prepare GitHub Release"'), 1)
-        self.assertEqual(workflow.count("-F draft=true"), 1)
-        self.assertEqual(workflow.count('release_id="${RELEASE_ID}"'), 2)
-        self.assertIn("$releaseId = $env:RELEASE_ID", workflow)
-        self.assertIn("package_distribution python cpython", workflow)
-        self.assertIn("package_distribution javascript quickjs", workflow)
-        self.assertIn("package_distribution busybox busybox", workflow)
+        self.assertEqual(linux_script.count("-F draft=true"), 1)
+        self.assertEqual(linux_script.count('local release_number="${RELEASE_ID}"'), 2)
+        self.assertIn("$releaseId = $env:RELEASE_ID", windows_script)
+        self.assertIn("package_distribution python cpython", linux_script)
+        self.assertIn("package_distribution javascript quickjs", linux_script)
+        self.assertIn("package_distribution busybox busybox", linux_script)
         self.assertIn(
-            "package_distribution ci-composed cpython-quickjs-busybox", workflow
+            "package_distribution ci-composed cpython-quickjs-busybox",
+            linux_script,
         )
-        self.assertIn("Package-Distribution python cpython", workflow)
-        self.assertIn("Package-Distribution javascript quickjs", workflow)
-        self.assertIn("Package-Distribution busybox busybox", workflow)
+        self.assertIn("New-DistributionPackage python cpython", windows_script)
+        self.assertIn("New-DistributionPackage javascript quickjs", windows_script)
+        self.assertIn("New-DistributionPackage busybox busybox", windows_script)
+        self.assertIn("ci-composed `\n        cpython-quickjs-busybox", windows_script)
         self.assertIn(
-            "Package-Distribution ci-composed cpython-quickjs-busybox", workflow
-        )
-        self.assertIn(
-            'f"nanvix-distro-windows-x86-microvm-256mb-cpython-{expected_commit}.zip"',
-            workflow,
-        )
-        self.assertIn(
-            'f"nanvix-distro-windows-x86-microvm-256mb-quickjs-{expected_commit}.zip"',
-            workflow,
+            'f"nanvix-distro-windows-x86-microvm-256mb-cpython-{commit}.zip"',
+            release_helper,
         )
         self.assertIn(
-            'f"nanvix-distro-windows-x86-microvm-256mb-busybox-{expected_commit}.zip"',
-            workflow,
+            'f"nanvix-distro-windows-x86-microvm-256mb-quickjs-{commit}.zip"',
+            release_helper,
         )
         self.assertIn(
-            'f"nanvix-distro-windows-x86-microvm-256mb-cpython-quickjs-busybox-{expected_commit}.zip"',
-            workflow,
+            'f"nanvix-distro-windows-x86-microvm-256mb-busybox-{commit}.zip"',
+            release_helper,
         )
-        self.assertIn("bin/nanvix.ramfs", workflow)
-        self.assertIn("Expected 4 Windows release distribution images", workflow)
-        self.assertIn("Expected 8 release distribution images", workflow)
+        self.assertIn(
+            'f"nanvix-distro-windows-x86-microvm-256mb-cpython-quickjs-busybox-{commit}.zip"',
+            release_helper,
+        )
+        self.assertIn("bin/nanvix.ramfs", linux_script)
+        self.assertIn("Expected 4 Windows release distribution images", windows_script)
+        self.assertIn("Expected 8 release distribution images", release_helper)
         self.assertEqual(
-            workflow.count("- Windows/WHP: CPython, QuickJS, and BusyBox"), 1
+            linux_script.count("- Windows/WHP: CPython, QuickJS, and BusyBox"), 1
         )
         self.assertIn('name: "Stage Release Distribution Images"', workflow)
-        self.assertIn("https://uploads.github.com/repos/${REPOSITORY}", workflow)
-        self.assertIn('--data-binary "@${asset}"', workflow)
-        self.assertNotIn("${api_url}/releases/tags/${release_tag}", workflow)
-        self.assertNotIn("$apiUrl/releases/tags/$releaseTag", workflow)
-        self.assertNotIn('gh release upload "${release_tag}"', workflow)
+        self.assertIn("https://uploads.github.com/repos/${REPOSITORY}", linux_script)
+        self.assertIn('--data-binary "@${asset}"', linux_script)
+        self.assertNotIn("${api_url}/releases/tags/${release_tag}", implementation)
+        self.assertNotIn("$apiUrl/releases/tags/$releaseTag", implementation)
+        self.assertNotIn('gh release upload "${release_tag}"', implementation)
         self.assertNotIn('name: "Upload Release Distribution Images"', workflow)
         self.assertNotIn("actions/download-artifact@v8", workflow)
-        self.assertIn('release_tag="distro-${GITHUB_SHA}"', workflow)
+        self.assertIn('release_tag="distro-${GITHUB_SHA}"', linux_script)
         self.assertIn(
-            "Release assets do not match the expected distribution set", workflow
+            "Release assets do not match the expected distribution set",
+            release_helper,
         )
-        self.assertIn('gh api "repos/${REPOSITORY}/releases?per_page=100"', workflow)
-        self.assertIn('-f tag_name="${release_tag}"', workflow)
-        self.assertIn('-f target_commitish="${GITHUB_SHA}"', workflow)
-        self.assertIn('"repos/${REPOSITORY}/releases/${release_id}"', workflow)
-        self.assertNotIn('gh release edit "${release_tag}"', workflow)
+        self.assertIn(
+            'gh api "repos/${REPOSITORY}/releases?per_page=100"', linux_script
+        )
+        self.assertIn('-f tag_name="${release_tag}"', linux_script)
+        self.assertIn('-f target_commitish="${GITHUB_SHA}"', linux_script)
+        self.assertIn('"repos/${REPOSITORY}/releases/${release_number}"', linux_script)
+        self.assertNotIn('gh release edit "${release_tag}"', implementation)
+
+    def test_workflows_invoke_only_standalone_scripts(self) -> None:
+        """Workflow run steps delegate implementation to checked-in scripts."""
+        workflows = (
+            self.read_project_file(".github/workflows/self-hosted-test.yml"),
+            self.read_project_file(".github/workflows/distro-autoupgrade.yml"),
+        )
+
+        for workflow in workflows:
+            with self.subTest(workflow=workflow.splitlines()[3]):
+                self.assertNotRegex(
+                    workflow,
+                    re.compile(r"^\s+run:\s*[|>]", re.MULTILINE),
+                )
+                run_commands = re.findall(r"^\s+run: (.+)$", workflow, re.MULTILINE)
+                self.assertTrue(run_commands)
+                self.assertTrue(
+                    all(
+                        "scripts/ci/" in command or "scripts\\ci\\" in command
+                        for command in run_commands
+                    )
+                )
+
+    def test_release_helper_rejects_invalid_ids(self) -> None:
+        """Release API identifiers must be valid before reaching shell callers."""
+        helper = self.ROOT / "scripts/ci/self-hosted-test.py"
+        cases = (
+            (
+                "find-draft-release",
+                [
+                    {
+                        "tag_name": "distro-commit",
+                        "target_commitish": "commit",
+                        "draft": True,
+                    }
+                ],
+                ("distro-commit", "commit"),
+            ),
+            (
+                "find-release-asset-ids",
+                [{"name": "distribution.tar.gz", "id": "123"}],
+                ("distribution.tar.gz",),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            for command, payload, arguments in cases:
+                with self.subTest(command=command):
+                    response = Path(temporary) / f"{command}.json"
+                    response.write_text(json.dumps(payload), encoding="utf-8")
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(helper),
+                            command,
+                            str(response),
+                            *arguments,
+                        ],
+                        capture_output=True,
+                        check=False,
+                        text=True,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("has invalid id", result.stderr)
 
 
 class IntegrationDocumentationTests(unittest.TestCase):
