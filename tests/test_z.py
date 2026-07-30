@@ -21,6 +21,7 @@ from z import (
     IncompleteReleaseSetError,
     PORTS,
     UpgradeTarget,
+    _upgrade_order,
     build_nanvix_core,
     build_port,
     clear_external_port_sysroot,
@@ -970,6 +971,33 @@ class RunCommandTests(unittest.TestCase):
 
 class UpgradeCommandTests(unittest.TestCase):
     """Verify distro release selection at the upgrade command boundary."""
+
+    def test_excludes_tooling_submodule_from_release_set(self) -> None:
+        """Repository tooling is pinned independently of distro releases."""
+        contract = MagicMock()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                patch("z.REPO_ROOT", root),
+                patch(
+                    "z.list_submodule_paths",
+                    return_value=[".github/prompts"],
+                ),
+                patch(
+                    "z.list_submodules",
+                    return_value=[
+                        (".github/prompts", ".github/prompts", "prompts-url")
+                    ],
+                ),
+                patch("z.run_cmd") as run_command,
+            ):
+                order = _upgrade_order(root)
+                targets = resolve_upgrade_targets(contract, verbose=False)
+
+        self.assertEqual(order, [])
+        self.assertEqual(targets, {})
+        run_command.assert_not_called()
 
     def test_identifies_missing_sdk_port_release_as_incomplete(self) -> None:
         """A missing exact SDK-qualified port tag is a propagating release set."""
