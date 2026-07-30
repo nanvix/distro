@@ -163,6 +163,8 @@ PORTS: dict[str, tuple[str, list[str]]] = {
     ),
 }
 
+UPGRADE_EXCLUDED_SUBMODULES: frozenset[str] = frozenset({".github/prompts"})
+
 # CPython stages a runtime tree below its release directory.
 PORT_EXPORT_ROOTS: dict[str, str] = {"cpython": "sysroot-pkg"}
 
@@ -657,7 +659,11 @@ class IncompleteReleaseSetError(ContractError):
 
 def _upgrade_order(repo: Path) -> list[str]:
     """Return top-level submodules in deterministic dependency-aware order."""
-    submodules = list_submodule_paths(repo)
+    submodules = [
+        path
+        for path in list_submodule_paths(repo)
+        if path not in UPGRADE_EXCLUDED_SUBMODULES
+    ]
     port_paths = {name: spec[0] for name, spec in PORTS.items()}
     port_order = list(reversed(topological_sort(PORTS)))
     ordered_ports = [
@@ -753,6 +759,8 @@ def resolve_upgrade_targets(
     targets: dict[str, UpgradeTarget] = {}
 
     for _, path, _ in list_submodules(REPO_ROOT):
+        if path in UPGRADE_EXCLUDED_SUBMODULES:
+            continue
         submodule = REPO_ROOT / path
         if not (submodule / ".git").exists():
             info(f"  initializing {path}")
