@@ -40,3 +40,6 @@
 [submodule "usr/lib/libffi"]
 	path = usr/lib/libffi
 	url = https://github.com/nanvix/libffi
+[submodule ".github/prompts"]
+	path = .github/prompts
+	url = https://github.com/nanvix/prompts
