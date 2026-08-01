@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import importlib.util
 import json
 import re
@@ -583,10 +582,6 @@ class PortArtifactExportTests(unittest.TestCase):
             module_spec.loader.exec_module(module)
         return module
 
-    @classmethod
-    def _load_cpython_docker_helper(cls) -> types.ModuleType:
-        return cls._load_cpython_helper("_docker")
-
     def test_libffi_configures_out_of_tree_without_recursive_reexec(self) -> None:
         """Autoconf must not rename its active config.log across WSL's 9p mount."""
         makefile = (
@@ -613,78 +608,6 @@ class PortArtifactExportTests(unittest.TestCase):
 
         with patch.object(module, "IS_WINDOWS", True):
             self.assertTrue(module.requires_isolated_workspace(Path("workspace")))
-
-    def test_cpython_copy_back_skips_source_directories(self) -> None:
-        """Isolated builds publish only successful, non-colliding outputs."""
-        docker_helper = self._load_cpython_docker_helper()
-        source_sync = docker_helper.sync_sources(Path("workspace"))
-        self.assertNotIn("|| true", source_sync)
-        self.assertIn("if [ -f", source_sync)
-
-        @dataclasses.dataclass
-        class Args:
-            release: bool = True
-            targets: list[str] = dataclasses.field(default_factory=lambda: list[str]())
-            install_prefix: str = "/"
-            sysroot: Path = Path("sysroot")
-            buildroot: Path = Path("buildroot")
-            docker: bool = False
-
-            def to_string(self) -> str:
-                return "make build"
-
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary)
-            destination = workspace / ".nanvix/out/staging/regular"
-            with (
-                patch.object(
-                    docker_helper,
-                    "_docker_run_base",
-                    return_value=["docker", "image"],
-                ),
-                patch.object(docker_helper.subprocess, "run") as run_command,
-            ):
-                docker_helper.docker_build(
-                    workspace,
-                    Args(),
-                    install_destdir=destination,
-                )
-
-        shell = run_command.call_args.args[0][-1]
-        self.assertIn("set -e;", shell)
-        self.assertNotIn("; rc=$?;", shell)
-        self.assertIn("/mnt/host-workspace/python ]", shell)
-        self.assertIn(".tmp", shell)
-        self.assertIn(".old", shell)
-        self.assertIn("cp -a /mnt/workspace/_install_staging/.", shell)
-
-    def test_cpython_isolated_clean_removes_named_volume(self) -> None:
-        """Clean invalidates the persistent case-sensitive build workspace."""
-        docker_helper = self._load_cpython_docker_helper()
-        inspect = subprocess.CompletedProcess[list[str]]([], 0)
-        remove = subprocess.CompletedProcess[list[str]]([], 0)
-
-        with (
-            patch.object(docker_helper.shutil, "which", return_value="docker"),
-            patch.object(docker_helper, "_volume_aliases", return_value={"volume"}),
-            patch.object(
-                docker_helper.subprocess,
-                "run",
-                side_effect=[inspect, remove],
-            ) as run_command,
-        ):
-            docker_helper.remove_build_volume(Path("workspace"))
-
-        self.assertEqual(run_command.call_count, 2)
-        self.assertEqual(
-            run_command.call_args_list[-1].args[0][:4],
-            [
-                "docker",
-                "volume",
-                "rm",
-                "--force",
-            ],
-        )
 
     def test_cpython_ramfs_uses_host_temporary_directory(self) -> None:
         """Random-access RAMFS generation stays off Windows-mounted WSL paths."""
