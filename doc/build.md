@@ -146,7 +146,7 @@ top-level submodule.
 The [Distro Autoupgrade workflow](../.github/workflows/distro-autoupgrade.yml) runs nightly and can be
 dispatched manually. It opens or refreshes a pull request from the dedicated
 `automation/distro-autoupgrade` branch containing the SDK contract and matching gitlink updates.
-The workflow dispatches the Self-Hosted Test workflow for the pull request head, waits for that
+The workflow dispatches the Distro Test workflow for the pull request head, waits for that
 exact run to pass, and merges the validated head commit. When the repository already uses the
 latest release set, it makes no changes.
 

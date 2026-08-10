@@ -96,6 +96,23 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertNotIn("self-hosted-test.ps1", workflow)
         self.assertEqual(workflow.count("continue-on-error: true"), 2)
 
+    def test_ci_uses_github_hosted_runners(self) -> None:
+        """Both host jobs bootstrap on ephemeral GitHub-hosted images."""
+        workflow = self.read_project_file(".github/workflows/self-hosted-test.yml")
+        runner = self.read_project_file("scripts/ci/self-hosted-test.py")
+
+        self.assertIn('name: "Distro Test"', workflow)
+        self.assertIn("runs-on: ubuntu-24.04", workflow)
+        self.assertIn("runs-on: windows-latest", workflow)
+        self.assertNotIn("group: Test", workflow)
+        self.assertNotIn("labels: [ self-hosted", workflow)
+        self.assertIn("install-rust-toolchain", workflow)
+        self.assertNotIn("pre-checkout-cleanup", workflow)
+        self.assertNotIn("refresh-path", workflow)
+        self.assertIn('kvm_device = "/dev/kvm"', runner)
+        self.assertNotIn("modprobe", runner)
+        self.assertIn('("rustup", "toolchain", "install", channel)', runner)
+
     def test_windows_release_tests_enable_kernel_success_marker(self) -> None:
         """Release tests retain the debug marker without changing artifact logging."""
         workflow = self.read_project_file(".github/workflows/self-hosted-test.yml")

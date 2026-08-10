@@ -411,27 +411,6 @@ def prepare_release() -> None:
     append_github_file("GITHUB_OUTPUT", "release-id", str(release_id))
 
 
-def pre_checkout_cleanup() -> None:
-    require_platform(windows=False)
-    images = workspace() / "images"
-    if images.is_dir():
-        print("Removing images directory before checkout...")
-        run(("sudo", "rm", "-rf", str(images)))
-
-
-def clean_workspace() -> None:
-    require_platform(windows=True)
-    nanvix = workspace() / "nanvix"
-    if nanvix.exists():
-        for root, directories, _ in os.walk(nanvix, topdown=False, followlinks=False):
-            for directory in directories:
-                path = Path(root) / directory
-                if path.is_junction() or path.is_symlink():
-                    run(("cmd", "/c", "rmdir", str(path)))
-                    print(f"Removed junction: {path}")
-    remove_drive_mapping()
-
-
 def clean_submodule_build_artifacts() -> None:
     run(
         ("git", "submodule", "foreach", "--recursive", "git", "clean", "-ffdx"),
@@ -480,29 +459,6 @@ def powershell_executable() -> str:
     return executable
 
 
-def refresh_path() -> None:
-    require_platform(windows=True)
-    command = (
-        "$machine = [Environment]::GetEnvironmentVariable('Path', 'Machine'); "
-        "$user = [Environment]::GetEnvironmentVariable('Path', 'User'); "
-        "Write-Output $machine; Write-Output $user"
-    )
-    paths = run_output(
-        (powershell_executable(), "-NoProfile", "-Command", command)
-    ).splitlines()
-    refreshed_path = ";".join(path for path in paths if path)
-    if not refreshed_path:
-        raise CiError("Cannot read PATH from the Windows registry")
-    os.environ["PATH"] = refreshed_path
-    append_github_file("GITHUB_ENV", "PATH", refreshed_path)
-
-
-def set_rust_environment() -> None:
-    require_platform(windows=True)
-    cargo_home = str(Path(require_env("USERPROFILE")) / ".cargo")
-    append_github_file("GITHUB_ENV", "CARGO_HOME", cargo_home)
-
-
 def remove_path(path: Path) -> None:
     if path.is_junction():
         path.rmdir()
@@ -514,7 +470,7 @@ def remove_path(path: Path) -> None:
 
 def isolate_cargo_home() -> None:
     require_platform(windows=True)
-    cargo_target = Path(require_env("CARGO_HOME")) / "bin"
+    cargo_target = Path(require_env("USERPROFILE")) / ".cargo/bin"
     isolated_cargo = Path(require_env("RUNNER_TEMP")) / ".cargo"
     isolated_cargo.mkdir(parents=True, exist_ok=True)
     cargo_bin = isolated_cargo / "bin"
@@ -524,7 +480,7 @@ def isolate_cargo_home() -> None:
     print(f"Isolated CARGO_HOME to {isolated_cargo}")
 
 
-def verify_rust_toolchain() -> None:
+def install_rust_toolchain() -> None:
     require_platform(windows=True)
     nanvix = Path("N:/nanvix")
     with (nanvix / "rust-toolchain").open("rb") as toolchain_file:
@@ -537,6 +493,11 @@ def verify_rust_toolchain() -> None:
     if not isinstance(channel, str):
         raise CiError("rust-toolchain does not define a channel")
     print(f"Expected toolchain: {channel}")
+    run(("rustup", "toolchain", "install", channel), cwd=nanvix)
+    run(
+        ("rustup", "component", "add", "--toolchain", channel, "clippy", "rustfmt"),
+        cwd=nanvix,
+    )
     run(("rustup", "show"), cwd=nanvix)
     run(("cargo", "--version"), cwd=nanvix)
 
@@ -583,11 +544,19 @@ def relocate_cargo_state() -> None:
 
 def setup_kvm() -> None:
     require_platform(windows=False)
-    run(("sudo", "modprobe", "kvm"))
-    intel = run(("sudo", "modprobe", "kvm_intel"), check=False)
-    if intel.returncode != 0:
-        run(("sudo", "modprobe", "kvm_amd"), check=False)
-    run(("sudo", "chmod", "666", "/dev/kvm"), check=False)
+    rule = 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"\n'
+    run(
+        ("sudo", "tee", "/etc/udev/rules.d/99-kvm4all.rules"),
+        input_text=rule,
+    )
+    run(("sudo", "udevadm", "control", "--reload-rules"))
+    run(("sudo", "udevadm", "trigger", "--name-match=kvm"))
+    kvm_device = "/dev/kvm"
+    if not Path(kvm_device).exists():
+        raise CiError("GitHub-hosted runner does not expose /dev/kvm")
+    if not os.access(kvm_device, os.R_OK | os.W_OK):
+        raise CiError("GitHub-hosted runner cannot read and write /dev/kvm")
+    run(("ls", "-l", kvm_device))
 
 
 def install_python_dependencies() -> None:
@@ -1076,15 +1045,11 @@ def remove_drive_mapping() -> None:
 
 TASKS: dict[str, Callable[[], None]] = {
     "prepare-release": prepare_release,
-    "pre-checkout-cleanup": pre_checkout_cleanup,
-    "clean-workspace": clean_workspace,
     "clean-submodule-build-artifacts": clean_submodule_build_artifacts,
     "create-short-drive-mapping": create_short_drive_mapping,
     "restore-directory-symlinks": restore_directory_symlinks,
-    "refresh-path": refresh_path,
-    "set-rust-environment": set_rust_environment,
     "isolate-cargo-home": isolate_cargo_home,
-    "verify-rust-toolchain": verify_rust_toolchain,
+    "install-rust-toolchain": install_rust_toolchain,
     "setup-prerequisites": setup_prerequisites,
     "relocate-cargo-state": relocate_cargo_state,
     "setup-kvm": setup_kvm,
