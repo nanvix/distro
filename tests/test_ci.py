@@ -128,7 +128,15 @@ class SelfHostedCiTests(unittest.TestCase):
                     input_text=rule,
                 ),
                 call(("sudo", "udevadm", "control", "--reload-rules")),
-                call(("sudo", "udevadm", "trigger", "--name-match=kvm")),
+                call(
+                    (
+                        "sudo",
+                        "udevadm",
+                        "trigger",
+                        "--settle",
+                        "--name-match=kvm",
+                    )
+                ),
                 call(("ls", "-l", "/dev/kvm")),
             ],
         )

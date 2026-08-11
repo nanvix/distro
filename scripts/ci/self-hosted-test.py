@@ -550,7 +550,7 @@ def setup_kvm() -> None:
         input_text=rule,
     )
     run(("sudo", "udevadm", "control", "--reload-rules"))
-    run(("sudo", "udevadm", "trigger", "--name-match=kvm"))
+    run(("sudo", "udevadm", "trigger", "--settle", "--name-match=kvm"))
     kvm_device = "/dev/kvm"
     if not Path(kvm_device).exists():
         raise CiError("GitHub-hosted runner does not expose /dev/kvm")
