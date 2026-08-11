@@ -1,7 +1,7 @@
 # Copyright(c) The Maintainers of Nanvix.
 # Licensed under the MIT License.
 
-name: "Self-Hosted Test"
+name: "Distro Test"
 
 on:
   workflow_dispatch:
@@ -62,47 +62,30 @@ jobs:
         run: python3 scripts/ci/self-hosted-test.py prepare-release
 
   # ==========================================================================================
-  # Linux: Build, Unit Test & Smoke Test (Self-Hosted)
+  # Linux: Build, Unit Test & Smoke Test (GitHub-Hosted)
   # ==========================================================================================
 
   linux-build-test:
     name: "Linux Build & Test"
     needs: prepare-release-distributions
     timeout-minutes: 120
-    runs-on:
-      group: Test
-      labels: [ self-hosted, Linux, docker ]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: write
 
     steps:
-      - name: "Checkout Pre-Checkout Cleanup Script"
-        uses: actions/checkout@v6
-        with:
-          path: .ci-bootstrap
-          sparse-checkout: scripts/ci/self-hosted-test.py
-          sparse-checkout-cone-mode: false
-
-      - name: "Pre-Checkout Cleanup"
-        shell: bash
-        run: python3 .ci-bootstrap/scripts/ci/self-hosted-test.py pre-checkout-cleanup
-
       - uses: actions/checkout@v6
         with:
           # OpenSSL carries optional upstream test submodules that are not part
           # of the distro build. Only materialize this repository's gitlinks.
           submodules: true
 
-      - name: "Clean Submodule Build Artifacts"
-        shell: bash
-        run: python3 scripts/ci/self-hosted-test.py clean-submodule-build-artifacts
-
       - name: "Relocate Cargo State"
         shell: bash
         run: python3 scripts/ci/self-hosted-test.py relocate-cargo-state
 
-      - name: "Setup KVM"
+      - name: "Enable KVM"
         shell: bash
         run: python3 scripts/ci/self-hosted-test.py setup-kvm
 
@@ -184,7 +167,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: linux-self-hosted-logs-${{ github.event.pull_request.number ||
+          name: linux-logs-${{ github.event.pull_request.number ||
             github.run_number }}
           overwrite: "true"
           path: |
@@ -226,7 +209,7 @@ jobs:
         run: python3 scripts/ci/self-hosted-test.py publish-release
 
   # ==========================================================================================
-  # Windows: Build & Test (Self-Hosted)
+  # Windows: Build & Test (GitHub-Hosted)
   # ==========================================================================================
 
   windows-build-test:
@@ -240,32 +223,15 @@ jobs:
           - ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' &&
             github.repository == 'nanvix/distro' && 'release' || 'debug' }}
         machine-type: [ microvm ]
-    runs-on:
-      group: Test
-      labels: [ self-hosted, Windows ]
+    runs-on: windows-latest
     permissions:
       contents: write
       actions: write
 
     steps:
-      - name: "Checkout Pre-Checkout Cleanup Script"
-        uses: actions/checkout@v6
-        with:
-          path: .ci-bootstrap
-          sparse-checkout: scripts/ci/self-hosted-test.py
-          sparse-checkout-cone-mode: false
-
-      - name: "Clean Workspace (remove leftover junctions)"
-        shell: pwsh
-        run: python .\.ci-bootstrap\scripts\ci\self-hosted-test.py clean-workspace
-
       - uses: actions/checkout@v6
         with:
           submodules: true
-
-      - name: "Clean Submodule Build Artifacts"
-        shell: pwsh
-        run: python .\scripts\ci\self-hosted-test.py clean-submodule-build-artifacts
 
       - name: "Create Short Drive Mapping"
         shell: pwsh
@@ -275,25 +241,17 @@ jobs:
         shell: pwsh
         run: python .\scripts\ci\self-hosted-test.py restore-directory-symlinks
 
-      - name: "Refresh PATH from Registry"
+      - name: "Install Rust Toolchain"
         shell: pwsh
-        run: python .\scripts\ci\self-hosted-test.py refresh-path
-
-      - name: "Set Rust Environment"
-        shell: pwsh
-        run: python .\scripts\ci\self-hosted-test.py set-rust-environment
-
-      - name: "Isolate Cargo Home"
-        shell: pwsh
-        run: python .\scripts\ci\self-hosted-test.py isolate-cargo-home
-
-      - name: "Verify Rust Toolchain"
-        shell: pwsh
-        run: python .\scripts\ci\self-hosted-test.py verify-rust-toolchain
+        run: python .\scripts\ci\self-hosted-test.py install-rust-toolchain
 
       - name: "Setup Prerequisites"
         shell: pwsh
         run: python .\scripts\ci\self-hosted-test.py setup-prerequisites
+
+      - name: "Isolate Cargo Home"
+        shell: pwsh
+        run: python .\scripts\ci\self-hosted-test.py isolate-cargo-home
 
       - name: "Setup sccache"
         uses: Mozilla-Actions/sccache-action@v0.0.10
@@ -370,7 +328,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: windows-self-hosted-logs-${{ github.event.pull_request.number ||
+          name: windows-logs-${{ github.event.pull_request.number ||
             github.run_number }}-${{ matrix.build-type }}-${{
             matrix.machine-type }}
           overwrite: "true"

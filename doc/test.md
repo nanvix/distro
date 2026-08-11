@@ -48,7 +48,7 @@ wsl.exe --distribution Ubuntu --exec bash -lc `
   'cd /mnt/c/path/to/nanvix-distro && test -r /dev/kvm && test -w /dev/kvm && python3 z.py test'
 ```
 
-The self-hosted Linux/KVM CI job additionally:
+The GitHub-hosted Linux/KVM CI job additionally:
 
 1. runs Black, Pyright, and the top-level Python regression tests;
 2. builds Nanvix and every userspace package through the pinned SDK;
@@ -57,7 +57,7 @@ The self-hosted Linux/KVM CI job additionally:
 5. boots the all-component image and exercises both CPython and QuickJS; and
 6. runs the Nanvix test target with `python3 z.py --verbose test`.
 
-The self-hosted Windows/WHP job runs the same top-level tooling checks, then builds, tests, and
+The GitHub-hosted Windows/WHP job runs the same top-level tooling checks, then builds, tests, and
 installs the native Nanvix runtime from a short drive mapping. Userspace package outputs are guest
 ELF files, so the job downloads the release archives selected by the exact BusyBox, QuickJS, and
 CPython submodule tags and verifies their GitHub-published SHA-256 digests instead of requiring a

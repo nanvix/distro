@@ -95,6 +95,31 @@ def test_upgraded_release_set() -> None:
     run((sys.executable, "-m", "unittest", "discover", "-v"))
 
 
+def list_ci_run_ids(repository: str, head_sha: str) -> list[str]:
+    output = run_output(
+        (
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            repository,
+            "--workflow",
+            "self-hosted-test.yml",
+            "--event",
+            "workflow_dispatch",
+            "--commit",
+            head_sha,
+            "--limit",
+            "100",
+            "--json",
+            "databaseId",
+            "--jq",
+            ".[].databaseId",
+        )
+    )
+    return output.splitlines()
+
+
 def wait_for_ci() -> None:
     repository = require_env("REPOSITORY")
     pull_request = require_env("PR_NUMBER")
@@ -126,6 +151,7 @@ def wait_for_ci() -> None:
             ".headRefName",
         )
     )
+    existing_run_ids = set(list_ci_run_ids(repository, head_sha))
     run(
         (
             "gh",
@@ -141,32 +167,17 @@ def wait_for_ci() -> None:
 
     run_id = ""
     for _ in range(30):
-        run_id = run_output(
-            (
-                "gh",
-                "run",
-                "list",
-                "--repo",
-                repository,
-                "--workflow",
-                "self-hosted-test.yml",
-                "--event",
-                "workflow_dispatch",
-                "--commit",
-                head_sha,
-                "--limit",
-                "1",
-                "--json",
-                "databaseId",
-                "--jq",
-                ".[0].databaseId // empty",
-            )
-        )
-        if run_id:
+        new_run_ids = [
+            candidate
+            for candidate in list_ci_run_ids(repository, head_sha)
+            if candidate not in existing_run_ids
+        ]
+        if new_run_ids:
+            run_id = new_run_ids[0]
             break
         time.sleep(10)
     if not run_id:
-        raise CiError(f"Self-Hosted Test did not start for commit {head_sha}")
+        raise CiError(f"Distro Test did not start for commit {head_sha}")
 
     status = ""
     conclusion = ""
