@@ -158,6 +158,46 @@ class SelfHostedCiTests(unittest.TestCase):
 
         self.assertNotIn(call(("ls", "-l", "/dev/kvm")), run_command.call_args_list)
 
+    def test_release_dispatch_requires_exact_main_commit(self) -> None:
+        """Release dispatches are bound to the requested upstream commit."""
+        runner = self.load_runner()
+        validate_release_dispatch = cast(
+            Callable[[], None],
+            getattr(runner, "validate_release_dispatch"),
+        )
+        commit = "a" * 40
+        environment = {
+            "EXPECTED_COMMIT": commit,
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_REPOSITORY": "nanvix/distro",
+            "GITHUB_SHA": commit,
+        }
+
+        with patch.dict(os.environ, environment):
+            validate_release_dispatch()
+
+        environment["EXPECTED_COMMIT"] = ""
+        with (
+            patch.dict(os.environ, environment),
+            self.assertRaisesRegex(
+                runner.CiError,
+                "did not specify an expected commit",
+            ),
+        ):
+            validate_release_dispatch()
+
+        environment["EXPECTED_COMMIT"] = commit
+        environment["GITHUB_SHA"] = "b" * 40
+        with (
+            patch.dict(os.environ, environment),
+            self.assertRaisesRegex(
+                runner.CiError,
+                "Release dispatch resolved commit",
+            ),
+        ):
+            validate_release_dispatch()
+
 
 class DistroAutoupgradeCiTests(unittest.TestCase):
     """Verify orchestration of autoupgrade validation runs."""
@@ -215,6 +255,64 @@ class DistroAutoupgradeCiTests(unittest.TestCase):
             state.call_args.args[0],
         )
         append_output.assert_called_once_with("head-sha", "head-sha")
+
+    def test_merge_dispatches_release_for_exact_merge_commit(self) -> None:
+        """A token-suppressed merge explicitly starts its release workflow."""
+        runner = self.load_runner()
+        merge_pull_request = cast(
+            Callable[[], None],
+            getattr(runner, "merge_pull_request"),
+        )
+        merge_commit = "a" * 40
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "MERGE_HEAD_SHA": "b" * 40,
+                    "PR_NUMBER": "13",
+                    "REPOSITORY": "nanvix/distro",
+                },
+            ),
+            patch.object(runner, "run_output", return_value=merge_commit),
+            patch.object(runner, "run") as run_command,
+        ):
+            merge_pull_request()
+
+        self.assertEqual(
+            run_command.call_args_list,
+            [
+                call(
+                    (
+                        "gh",
+                        "pr",
+                        "merge",
+                        "--repo",
+                        "nanvix/distro",
+                        "--merge",
+                        "--match-head-commit",
+                        "b" * 40,
+                        "13",
+                    )
+                ),
+                call(
+                    (
+                        "gh",
+                        "workflow",
+                        "run",
+                        "self-hosted-test.yml",
+                        "--repo",
+                        "nanvix/distro",
+                        "--ref",
+                        "main",
+                        "--field",
+                        "release=true",
+                        "--field",
+                        f"expected_commit={merge_commit}",
+                    )
+                ),
+            ],
+        )
 
 
 if __name__ == "__main__":

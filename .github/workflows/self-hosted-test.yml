@@ -5,6 +5,16 @@ name: "Distro Test"
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Build and publish distribution release images"
+        required: false
+        default: false
+        type: boolean
+      expected_commit:
+        description: "Exact main commit expected for a release dispatch"
+        required: false
+        type: string
 
   pull_request:
     types:
@@ -42,6 +52,7 @@ jobs:
       contents: write
     outputs:
       release-id: ${{ steps.release.outputs.release-id }}
+      release-build: ${{ steps.release.outputs.release-id != '' }}
 
     steps:
       - name: "Checkout CI Scripts"
@@ -49,10 +60,18 @@ jobs:
         with:
           sparse-checkout: scripts/ci
 
+      - name: "Validate Release Dispatch"
+        if: github.event_name == 'workflow_dispatch' && inputs.release
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: python3 scripts/ci/self-hosted-test.py validate-release-dispatch
+
       - name: "Prepare GitHub Release"
         id: release
         if: |
-          github.event_name == 'push' &&
+          (github.event_name == 'push' ||
+            (github.event_name == 'workflow_dispatch' && inputs.release)) &&
           github.ref == 'refs/heads/main' &&
           github.repository == 'nanvix/distro'
         shell: bash
@@ -123,10 +142,7 @@ jobs:
         run: python3 scripts/ci/self-hosted-test.py smoke-test-composed
 
       - name: "Package Release Distribution Images"
-        if: |
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
-          github.repository == 'nanvix/distro'
+        if: needs.prepare-release-distributions.outputs.release-build == 'true'
         shell: bash
         run: python3 scripts/ci/self-hosted-test.py package-release-distributions
 
@@ -141,10 +157,7 @@ jobs:
         run: python3 scripts/ci/self-hosted-test.py test
 
       - name: "Stage Release Distribution Images"
-        if: |
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
-          github.repository == 'nanvix/distro'
+        if: needs.prepare-release-distributions.outputs.release-build == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -186,10 +199,7 @@ jobs:
   publish-release-distributions:
     name: "Publish Release Distribution Images"
     needs: [ prepare-release-distributions, linux-build-test, windows-build-test ]
-    if: |
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      github.repository == 'nanvix/distro'
+    if: needs.prepare-release-distributions.outputs.release-build == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -220,8 +230,8 @@ jobs:
       fail-fast: false
       matrix:
         build-type:
-          - ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-            github.repository == 'nanvix/distro' && 'release' || 'debug' }}
+          - ${{ needs.prepare-release-distributions.outputs.release-build == 'true' &&
+            'release' || 'debug' }}
         machine-type: [ microvm ]
     runs-on: windows-latest
     permissions:
@@ -294,18 +304,14 @@ jobs:
       - name: "Package Release Distribution Images"
         if: |
           matrix.build-type == 'release' &&
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
-          github.repository == 'nanvix/distro'
+          needs.prepare-release-distributions.outputs.release-build == 'true'
         shell: pwsh
         run: python .\scripts\ci\self-hosted-test.py package-release-distributions
 
       - name: "Stage Release Distribution Images"
         if: |
           matrix.build-type == 'release' &&
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
-          github.repository == 'nanvix/distro'
+          needs.prepare-release-distributions.outputs.release-build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

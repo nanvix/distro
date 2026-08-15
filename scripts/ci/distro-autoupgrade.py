@@ -212,17 +212,51 @@ def wait_for_ci() -> None:
 
 
 def merge_pull_request() -> None:
+    repository = require_env("REPOSITORY")
+    pull_request = require_env("PR_NUMBER")
     run(
         (
             "gh",
             "pr",
             "merge",
             "--repo",
-            require_env("REPOSITORY"),
+            repository,
             "--merge",
             "--match-head-commit",
             require_env("MERGE_HEAD_SHA"),
-            require_env("PR_NUMBER"),
+            pull_request,
+        )
+    )
+    merge_commit = run_output(
+        (
+            "gh",
+            "pr",
+            "view",
+            pull_request,
+            "--repo",
+            repository,
+            "--json",
+            "mergeCommit",
+            "--jq",
+            ".mergeCommit.oid // empty",
+        )
+    )
+    if not re.fullmatch(r"[0-9a-f]{40}", merge_commit):
+        raise CiError(f"Pull request has no valid merge commit: {merge_commit!r}")
+    run(
+        (
+            "gh",
+            "workflow",
+            "run",
+            "self-hosted-test.yml",
+            "--repo",
+            repository,
+            "--ref",
+            "main",
+            "--field",
+            "release=true",
+            "--field",
+            f"expected_commit={merge_commit}",
         )
     )
 

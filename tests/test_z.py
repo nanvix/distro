@@ -171,10 +171,12 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn("publish-release-distributions:", workflow)
         self.assertIn('name: "Publish Release Distribution Images"', workflow)
         self.assertIn("github.event_name == 'push'", workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
-        self.assertGreaterEqual(
-            workflow.count("github.repository == 'nanvix/distro'"), 3
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.release", workflow
         )
+        self.assertIn("EXPECTED_COMMIT: ${{ inputs.expected_commit }}", workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertEqual(workflow.count("github.repository == 'nanvix/distro'"), 1)
         self.assertNotIn("nanvix/nanvix-distro", workflow)
         self.assertIn("prepare-release-distributions:", workflow)
         self.assertIn(
@@ -183,6 +185,10 @@ class WorkflowConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(workflow.count("needs: prepare-release-distributions"), 2)
         self.assertIn("release-id: ${{ steps.release.outputs.release-id }}", workflow)
+        self.assertIn(
+            "release-build: ${{ steps.release.outputs.release-id != '' }}",
+            workflow,
+        )
         self.assertEqual(
             workflow.count(
                 "RELEASE_ID: ${{ needs.prepare-release-distributions.outputs.release-id }}"
