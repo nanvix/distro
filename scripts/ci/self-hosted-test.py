@@ -411,6 +411,25 @@ def prepare_release() -> None:
     append_github_file("GITHUB_OUTPUT", "release-id", str(release_id))
 
 
+def validate_release_dispatch() -> None:
+    expected_commit = os.environ.get("EXPECTED_COMMIT", "")
+    commit = require_env("GITHUB_SHA")
+    if require_env("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        raise CiError("Release dispatch validation requires workflow_dispatch")
+    if require_env("GITHUB_REPOSITORY") != "nanvix/distro":
+        raise CiError("Release dispatch is only permitted in nanvix/distro")
+    if require_env("GITHUB_REF") != "refs/heads/main":
+        raise CiError("Release dispatch must target the main branch")
+    if not expected_commit:
+        raise CiError("Release dispatch did not specify an expected commit")
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
+        raise CiError(f"Invalid expected release commit: {expected_commit!r}")
+    if expected_commit != commit:
+        raise CiError(
+            f"Release dispatch resolved commit {commit}, expected {expected_commit}"
+        )
+
+
 def clean_submodule_build_artifacts() -> None:
     run(
         ("git", "submodule", "foreach", "--recursive", "git", "clean", "-ffdx"),
@@ -1045,6 +1064,7 @@ def remove_drive_mapping() -> None:
 
 TASKS: dict[str, Callable[[], None]] = {
     "prepare-release": prepare_release,
+    "validate-release-dispatch": validate_release_dispatch,
     "clean-submodule-build-artifacts": clean_submodule_build_artifacts,
     "create-short-drive-mapping": create_short_drive_mapping,
     "restore-directory-symlinks": restore_directory_symlinks,
