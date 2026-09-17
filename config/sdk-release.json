@@ -13,27 +13,27 @@
     "wide_chars": true
   },
   "image": {
-    "digest": "sha256:0731b89fb17ebbb881b3409bc4930fe0845366b4c55128ab77aceb1c0c476394",
+    "digest": "sha256:0761b754cde2db63a6d72a2852978132143766016159ba72b7bd616297cb89ec",
     "name": "ghcr.io/nanvix/nanvix-sdk-c-clang",
-    "ref": "ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:0731b89fb17ebbb881b3409bc4930fe0845366b4c55128ab77aceb1c0c476394"
+    "ref": "ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:0761b754cde2db63a6d72a2852978132143766016159ba72b7bd616297cb89ec"
   },
   "libc": {
-    "nanvix_commit": "fa7f9b798f959acb51c308b47de191b72bbbd4d4",
-    "nanvix_tag": "v0.24.30",
-    "nanvix_version": "0.24.30",
-    "sysroot_sha256": "991b70fb7241180bc9abce0648a0bf7d02f2b29a23f5277a8dccdce3bf73f7e2"
+    "nanvix_commit": "cbeaaa2a04c4d99b1730e71841f84275b9f1ab43",
+    "nanvix_tag": "v0.24.33",
+    "nanvix_version": "0.24.33",
+    "sysroot_sha256": "7f05a608721e29c4df5276874f3a840951c0f70b7f8bd6c9d2e661ad0ebfcd95"
   },
   "provider": "clang",
   "provider_id": "c-clang",
   "role": "c",
   "schema_version": 1,
-  "sdk_version": "v0.24.30-sdk.1",
+  "sdk_version": "v0.24.33-sdk.1",
   "target": {
     "alias": "i686-nanvix",
     "triple": "i686-unknown-nanvix"
   },
   "toolchain": {
-    "llvm_commit": "fd38c146d30e87e29171bdee122ed18ccd7de5c7",
+    "llvm_commit": "4debcb25e88394d1b00e2ed4d9fc29f4c1021cb3",
     "llvm_version": "22.1.8",
     "port_branch": "nanvix/v22.1.8"
   }
